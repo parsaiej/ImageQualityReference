@@ -25,6 +25,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(spdlog          CONFIG REQUIRED)
 find_package(Jolt            CONFIG REQUIRED)
+find_package(imgui           CONFIG REQUIRED)
 
 # Executable
 # --------------------------------
@@ -32,6 +33,11 @@ find_package(Jolt            CONFIG REQUIRED)
 add_executable(ImageQualityReference WIN32
     Source/Main.cpp
 )
+
+# PCH
+# --------------------------------
+
+target_precompile_headers(ImageQualityReference PRIVATE Source/Precompiled.h)
 
 # Defines
 # --------------------------------
@@ -52,8 +58,13 @@ target_link_libraries(ImageQualityReference PRIVATE
     Jolt::Jolt
     dxgi
     d3d12
+    imgui::imgui
 )
 
 configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/D3D12Core.dll      D3D12/D3D12Core.dll      COPYONLY)
-configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/D3D12Core.dll      D3D12/D3D12Core.dll      COPYONLY)
+configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/DirectSR.dll       D3D12/DirectSR.dll       COPYONLY)
 configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/d3d12SDKLayers.dll D3D12/d3d12SDKLayers.dll COPYONLY)
+
+configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/D3D12Core.pdb      D3D12/D3D12Core.pdb      COPYONLY)
+configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/DirectSR.pdb       D3D12/DirectSR.pdb       COPYONLY)
+configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/d3d12SDKLayers.pdb D3D12/d3d12SDKLayers.pdb COPYONLY)

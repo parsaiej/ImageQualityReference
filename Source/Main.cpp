@@ -1,11 +1,3 @@
-#include <spdlog/spdlog.h>
-#include <d3dx12.h>
-#include <dxgi1_6.h>
-#include <directsr.h>
-#include <wrl.h>
-
-using namespace Microsoft::WRL;
-
 // clang-format off
 // Tell Windows to load the Agility SDK DLLs. 
 extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 715; }
@@ -21,12 +13,17 @@ extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\
 
 HWND s_Window = nullptr;
 
+#include <atlbase.h>
+
 int s_CurrentSwapChainImageIndex;
 int s_RTVDescriptorSize;
+int s_SRVDescriptorSize;
 
 ComPtr<ID3D12Device>              s_LogicalDevice     = nullptr;
+ComPtr<IDSRDevice>                s_DSRDevice         = nullptr;
 ComPtr<ID3D12CommandQueue>        s_CommandQueue      = nullptr;
 ComPtr<ID3D12DescriptorHeap>      s_RTVDescriptorHeap = nullptr;
+ComPtr<ID3D12DescriptorHeap>      s_SRVDescriptorHeap = nullptr;
 ComPtr<ID3D12CommandAllocator>    s_CommandAllocator  = nullptr;
 ComPtr<ID3D12GraphicsCommandList> s_CommandList       = nullptr;
 ComPtr<IDXGISwapChain3>           s_SwapChain         = nullptr;
@@ -43,7 +40,7 @@ UINT64              s_FenceValue                = 0U;
 void CreateOperatingSystemWindow(HINSTANCE hInstance);
 
 // Create a DXGI swap-chain for the OS window.
-void CreateSwapChain();
+void InitializeGraphicsRuntime();
 
 // Load PSOs, simulation state, command buffers, etc.
 void LoadResources();
@@ -71,7 +68,7 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
 {
     CreateOperatingSystemWindow(hInstance);
 
-    CreateSwapChain();
+    InitializeGraphicsRuntime();
 
     LoadResources();
 
@@ -88,6 +85,11 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
             DispatchMessage(&msg);
         }
     }
+
+    // Tear down ImGui.
+    ImGui_ImplDX12_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
 
     // Return this part of the WM_QUIT message to Windows.
     return static_cast<char>(msg.wParam);
@@ -126,8 +128,8 @@ void CreateOperatingSystemWindow(HINSTANCE hInstance)
                             hInstance,
                             nullptr);
 }
-
-void CreateSwapChain()
+#include <atlbase.h>
+void InitializeGraphicsRuntime()
 {
     UINT dxgiFactoryFlags = 0;
 
@@ -152,7 +154,7 @@ void CreateSwapChain()
     ComPtr<IDXGIAdapter1> hardwareAdapter;
     GetHardwareAdapter(factory.Get(), &hardwareAdapter);
 
-    ThrowIfFailed(D3D12CreateDevice(hardwareAdapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&s_LogicalDevice)));
+    ThrowIfFailed(D3D12CreateDevice(hardwareAdapter.Get(), D3D_FEATURE_LEVEL_12_2, IID_PPV_ARGS(&s_LogicalDevice)));
 
     // Describe and create the command queue.
     D3D12_COMMAND_QUEUE_DESC queueDesc = {};
@@ -185,14 +187,24 @@ void CreateSwapChain()
     ThrowIfFailed(swapChain.As(&s_SwapChain));
     s_CurrentSwapChainImageIndex = s_SwapChain->GetCurrentBackBufferIndex();
 
-    // Describe and create a render target view (RTV) descriptor heap.
-    D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
-    rtvHeapDesc.NumDescriptors             = SWAP_CHAIN_IMAGE_COUNT;
-    rtvHeapDesc.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-    rtvHeapDesc.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-    ThrowIfFailed(s_LogicalDevice->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&s_RTVDescriptorHeap)));
+    // Descriptor heaps.
+    {
+        // Describe and create a render target view (RTV) descriptor heap.
+        D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
+        rtvHeapDesc.NumDescriptors             = SWAP_CHAIN_IMAGE_COUNT;
+        rtvHeapDesc.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+        rtvHeapDesc.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+        ThrowIfFailed(s_LogicalDevice->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&s_RTVDescriptorHeap)));
 
-    s_RTVDescriptorSize = s_LogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+        D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
+        srvHeapDesc.NumDescriptors             = 32;
+        srvHeapDesc.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        srvHeapDesc.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        ThrowIfFailed(s_LogicalDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&s_SRVDescriptorHeap)));
+
+        s_RTVDescriptorSize = s_LogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+        s_SRVDescriptorSize = s_LogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    }
 
     // Create frame resources.
     {
@@ -208,6 +220,46 @@ void CreateSwapChain()
     }
 
     ThrowIfFailed(s_LogicalDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&s_CommandAllocator)));
+
+    // Initialize DirectSR device.
+    {
+        ComPtr<ID3D12DSRDeviceFactory> pDSRDeviceFactory;
+        ThrowIfFailed(D3D12GetInterface(CLSID_D3D12DSRDeviceFactory, IID_PPV_ARGS(&pDSRDeviceFactory)));
+        ThrowIfFailed(pDSRDeviceFactory->CreateDSRDevice(s_LogicalDevice.Get(), 1, IID_PPV_ARGS(&s_DSRDevice)));
+
+        UINT numDsrVariants = s_DSRDevice->GetNumSuperResVariants();
+
+        for (UINT index = 0; index < numDsrVariants; index++)
+        {
+            DSR_SUPERRES_VARIANT_DESC variantDesc;
+            ThrowIfFailed(s_DSRDevice->GetSuperResVariantDesc(index, &variantDesc));
+        }
+    }
+
+    // Initialize ImGui.
+    {
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+
+        ImGuiIO& io = ImGui::GetIO();
+
+        (void)io;
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;  // Enable Gamepad Controls
+
+        ImGui::StyleColorsDark();
+        ImGui_ImplWin32_Init(s_Window);
+
+        auto srvHeapCPUHandle = s_SRVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+        auto srvHeapGPUHandle = s_SRVDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
+
+        ImGui_ImplDX12_Init(s_LogicalDevice.Get(),
+                            SWAP_CHAIN_IMAGE_COUNT,
+                            DXGI_FORMAT_R8G8B8A8_UNORM,
+                            s_SRVDescriptorHeap.Get(),
+                            srvHeapCPUHandle,
+                            srvHeapGPUHandle);
+    }
 }
 
 void LoadResources()
@@ -250,6 +302,11 @@ void Render()
     // re-recording.
     ThrowIfFailed(s_CommandList->Reset(s_CommandAllocator.Get(), nullptr));
 
+    // Start the Dear ImGui frame
+    ImGui_ImplDX12_NewFrame();
+    ImGui_ImplWin32_NewFrame();
+    ImGui::NewFrame();
+
     // Indicate that the back buffer will be used as a render target.
     auto presentToRenderBarrier = CD3DX12_RESOURCE_BARRIER::Transition(s_SwapChainImages[s_CurrentSwapChainImageIndex].Get(),
                                                                        D3D12_RESOURCE_STATE_PRESENT,
@@ -264,6 +321,13 @@ void Render()
     // Record commands.
     const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
     s_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+
+    static bool s_ShowWindow = true;
+    ImGui::ShowDemoWindow(&s_ShowWindow);
+    ImGui::Render();
+
+    s_CommandList->SetDescriptorHeaps(1, s_SRVDescriptorHeap.GetAddressOf());
+    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), s_CommandList.Get());
 
     // Indicate that the back buffer will now be used to present.
     auto renderToPresentBarrier = CD3DX12_RESOURCE_BARRIER::Transition(s_SwapChainImages[s_CurrentSwapChainImageIndex].Get(),
@@ -283,8 +347,14 @@ void Render()
     WaitForPreviousFrame();
 }
 
+// Forward declare message handler from imgui_impl_win32.cpp
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
 LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
+    if (ImGui_ImplWin32_WndProcHandler(hWnd, message, wParam, lParam))
+        return true;
+
     switch (message)
     {
         case WM_PAINT  : Render(); return 0;
@@ -324,7 +394,7 @@ _Use_decl_annotations_ void GetHardwareAdapter(IDXGIFactory1* pFactory, IDXGIAda
 
             // Check to see whether the adapter supports Direct3D 12, but don't create the
             // actual device yet.
-            if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, _uuidof(ID3D12Device), nullptr)))
+            if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_2, _uuidof(ID3D12Device), nullptr)))
             {
                 break;
             }
@@ -347,7 +417,7 @@ _Use_decl_annotations_ void GetHardwareAdapter(IDXGIFactory1* pFactory, IDXGIAda
 
             // Check to see whether the adapter supports Direct3D 12, but don't create the
             // actual device yet.
-            if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, _uuidof(ID3D12Device), nullptr)))
+            if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_2, _uuidof(ID3D12Device), nullptr)))
             {
                 break;
             }
