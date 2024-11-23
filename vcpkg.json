@@ -1,7 +1,6 @@
 {
     "dependencies": [
       { "name": "spdlog", "features": ["wchar"] },
-      "joltphysics",
-      "directx-headers"
+      "joltphysics"
     ]
   }

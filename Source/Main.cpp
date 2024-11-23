@@ -1,9 +1,16 @@
 #include <spdlog/spdlog.h>
-#include <directx/d3dx12.h>
+#include <d3dx12.h>
 #include <dxgi1_6.h>
+#include <directsr.h>
 #include <wrl.h>
 
 using namespace Microsoft::WRL;
+
+// clang-format off
+// Tell Windows to load the Agility SDK DLLs. 
+extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 715; }
+extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\"; }
+// clang-format on
 
 #define VIEWPORT_W             1280
 #define VIEWPORT_H             720
