@@ -17,11 +17,17 @@ HWND s_Window = nullptr;
 int s_CurrentSwapChainImageIndex;
 int s_RTVDescriptorSize;
 
-ComPtr<ID3D12Device>         s_LogicalDevice     = nullptr;
-ComPtr<ID3D12CommandQueue>   s_CommandQueue      = nullptr;
-ComPtr<ID3D12DescriptorHeap> s_RTVDescriptorHeap = nullptr;
-ComPtr<IDXGISwapChain3>      s_SwapChain         = nullptr;
-ComPtr<ID3D12Resource>       s_SwapChainImages[SWAP_CHAIN_IMAGE_COUNT];
+ComPtr<ID3D12Device>              s_LogicalDevice     = nullptr;
+ComPtr<ID3D12CommandQueue>        s_CommandQueue      = nullptr;
+ComPtr<ID3D12DescriptorHeap>      s_RTVDescriptorHeap = nullptr;
+ComPtr<ID3D12CommandAllocator>    s_CommandAllocator  = nullptr;
+ComPtr<ID3D12GraphicsCommandList> s_CommandList       = nullptr;
+ComPtr<IDXGISwapChain3>           s_SwapChain         = nullptr;
+ComPtr<ID3D12Resource>            s_SwapChainImages[SWAP_CHAIN_IMAGE_COUNT];
+
+ComPtr<ID3D12Fence> s_Fence                     = nullptr;
+HANDLE              s_FenceOperatingSystemEvent = nullptr;
+UINT64              s_FenceValue                = 0U;
 
 // Utility Prototypes
 // -----------------------------
@@ -31,6 +37,12 @@ void CreateOperatingSystemWindow(HINSTANCE hInstance);
 
 // Create a DXGI swap-chain for the OS window.
 void CreateSwapChain();
+
+// Load PSOs, simulation state, command buffers, etc.
+void LoadResources();
+
+// Command list recording and queue submission for current swap chain image.
+void Render();
 
 // Message handle for a Microsoft Windows window.
 LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
@@ -42,6 +54,9 @@ _Use_decl_annotations_ void GetHardwareAdapter(IDXGIFactory1* pFactory, IDXGIAda
 // Crashing utility.
 void ThrowIfFailed(HRESULT hr);
 
+// Use fence primitives to pause the thread until the previous swap-chain image has finished being drawn and presented.
+void WaitForPreviousFrame();
+
 // Entry-point
 // -----------------------------
 
@@ -50,6 +65,8 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
     CreateOperatingSystemWindow(hInstance);
 
     CreateSwapChain();
+
+    LoadResources();
 
     ShowWindow(s_Window, nCmdShow);
 
@@ -182,12 +199,88 @@ void CreateSwapChain()
             rtvHandle.Offset(1, s_RTVDescriptorSize);
         }
     }
+
+    ThrowIfFailed(s_LogicalDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&s_CommandAllocator)));
+}
+
+void LoadResources()
+{
+    // Create the command list.
+    ThrowIfFailed(
+        s_LogicalDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, s_CommandAllocator.Get(), nullptr, IID_PPV_ARGS(&s_CommandList)));
+
+    // Command lists are created in the recording state, but there is nothing
+    // to record yet. The main loop expects it to be closed, so close it now.
+    ThrowIfFailed(s_CommandList->Close());
+
+    // Create synchronization objects and wait until assets have been uploaded to the GPU.
+    {
+        ThrowIfFailed(s_LogicalDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&s_Fence)));
+        s_FenceValue = 1;
+
+        // Create an event handle to use for frame synchronization.
+        s_FenceOperatingSystemEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+
+        if (s_FenceOperatingSystemEvent == nullptr)
+            ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+
+        // Wait for the command list to execute; we are reusing the same command
+        // list in our main loop but for now, we just want to wait for setup to
+        // complete before continuing.
+        WaitForPreviousFrame();
+    }
+}
+
+void Render()
+{
+    // Command list allocators can only be reset when the associated
+    // command lists have finished execution on the GPU; apps should use
+    // fences to determine GPU execution progress.
+    ThrowIfFailed(s_CommandAllocator->Reset());
+
+    // However, when ExecuteCommandList() is called on a particular command
+    // list, that command list can then be reset at any time and must be before
+    // re-recording.
+    ThrowIfFailed(s_CommandList->Reset(s_CommandAllocator.Get(), nullptr));
+
+    // Indicate that the back buffer will be used as a render target.
+    auto presentToRenderBarrier = CD3DX12_RESOURCE_BARRIER::Transition(s_SwapChainImages[s_CurrentSwapChainImageIndex].Get(),
+                                                                       D3D12_RESOURCE_STATE_PRESENT,
+                                                                       D3D12_RESOURCE_STATE_RENDER_TARGET);
+    s_CommandList->ResourceBarrier(1, &presentToRenderBarrier);
+
+    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(s_RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+                                            s_CurrentSwapChainImageIndex,
+                                            s_RTVDescriptorSize);
+    s_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+
+    // Record commands.
+    const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
+    s_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+
+    // Indicate that the back buffer will now be used to present.
+    auto renderToPresentBarrier = CD3DX12_RESOURCE_BARRIER::Transition(s_SwapChainImages[s_CurrentSwapChainImageIndex].Get(),
+                                                                       D3D12_RESOURCE_STATE_RENDER_TARGET,
+                                                                       D3D12_RESOURCE_STATE_PRESENT);
+    s_CommandList->ResourceBarrier(1, &renderToPresentBarrier);
+
+    ThrowIfFailed(s_CommandList->Close());
+
+    // Execute the command list.
+    ID3D12CommandList* ppCommandLists[] = { s_CommandList.Get() };
+    s_CommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+
+    // Present the frame.
+    ThrowIfFailed(s_SwapChain->Present(1, 0));
+
+    WaitForPreviousFrame();
 }
 
 LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
     {
+        case WM_PAINT  : Render(); return 0;
         case WM_DESTROY: PostQuitMessage(0); return 0;
     }
 
@@ -282,4 +375,26 @@ void ThrowIfFailed(HRESULT hr)
     {
         throw HrException(hr);
     }
+}
+
+void WaitForPreviousFrame()
+{
+    // WAITING FOR THE FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
+    // This is code implemented as such for simplicity. The D3D12HelloFrameBuffering
+    // sample illustrates how to use fences for efficient resource usage and to
+    // maximize GPU utilization.
+
+    // Signal and increment the fence value.
+    const UINT64 fence = s_FenceValue;
+    ThrowIfFailed(s_CommandQueue->Signal(s_Fence.Get(), fence));
+    s_FenceValue++;
+
+    // Wait until the previous frame is finished.
+    if (s_Fence->GetCompletedValue() < fence)
+    {
+        ThrowIfFailed(s_Fence->SetEventOnCompletion(fence, s_FenceOperatingSystemEvent));
+        WaitForSingleObject(s_FenceOperatingSystemEvent, INFINITE);
+    }
+
+    s_CurrentSwapChainImageIndex = s_SwapChain->GetCurrentBackBufferIndex();
 }
