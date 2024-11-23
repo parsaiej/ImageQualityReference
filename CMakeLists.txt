@@ -16,8 +16,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Packages
 # --------------------------------
 
-find_package(spdlog CONFIG REQUIRED)
-find_package(Jolt   CONFIG REQUIRED)
+find_package(spdlog          CONFIG REQUIRED)
+find_package(Jolt            CONFIG REQUIRED)
+find_package(directx-headers CONFIG REQUIRED)
 
 # Executable
 # --------------------------------
@@ -37,4 +38,5 @@ target_link_libraries(ImageQualityReference PRIVATE
     Jolt::Jolt
     dxgi
     d3d12
+    Microsoft::DirectX-Headers
 )
