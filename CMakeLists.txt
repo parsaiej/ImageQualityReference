@@ -26,6 +26,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(spdlog          CONFIG REQUIRED)
 find_package(Jolt            CONFIG REQUIRED)
 find_package(imgui           CONFIG REQUIRED)
+find_package(magic_enum      CONFIG REQUIRED)
 
 # Executable
 # --------------------------------
@@ -59,6 +60,7 @@ target_link_libraries(ImageQualityReference PRIVATE
     dxgi
     d3d12
     imgui::imgui
+    magic_enum::magic_enum
 )
 
 configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/D3D12Core.dll      D3D12/D3D12Core.dll      COPYONLY)

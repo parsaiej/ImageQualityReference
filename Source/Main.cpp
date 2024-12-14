@@ -4,16 +4,27 @@ extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 715; }
 extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\"; }
 // clang-format on
 
-#define VIEWPORT_W             1280
-#define VIEWPORT_H             720
-#define SWAP_CHAIN_IMAGE_COUNT 2
+#define VIEWPORT_W     1920
+#define VIEWPORT_H     1080
+#define NUM_BACKBUFFER 2
+
+// Options
+// -----------------------------
+
+enum WindowMode
+{
+    Windowed,
+    BorderlessFullscreen,
+    ExclusiveFullscreen
+};
 
 // State
 // -----------------------------
 
-HWND s_Window = nullptr;
+HINSTANCE s_Instance = nullptr;
+HWND      s_Window   = nullptr;
 
-#include <atlbase.h>
+WindowMode s_WindowMode = WindowMode::Windowed;
 
 int s_CurrentSwapChainImageIndex;
 int s_RTVDescriptorSize;
@@ -26,34 +37,59 @@ ComPtr<ID3D12DescriptorHeap>      s_RTVDescriptorHeap = nullptr;
 ComPtr<ID3D12DescriptorHeap>      s_SRVDescriptorHeap = nullptr;
 ComPtr<ID3D12CommandAllocator>    s_CommandAllocator  = nullptr;
 ComPtr<ID3D12GraphicsCommandList> s_CommandList       = nullptr;
-ComPtr<IDXGISwapChain3>           s_SwapChain         = nullptr;
-ComPtr<ID3D12Resource>            s_SwapChainImages[SWAP_CHAIN_IMAGE_COUNT];
+ComPtr<ID3D12Resource>            s_SwapChainImages[NUM_BACKBUFFER];
 
 ComPtr<ID3D12Fence> s_Fence                     = nullptr;
 HANDLE              s_FenceOperatingSystemEvent = nullptr;
 UINT64              s_FenceValue                = 0U;
 
+// Process -> Adapter -> Display (DXGI)
+ComPtr<IDXGIAdapter1>           s_DXGIAdapter;
+ComPtr<IDXGIFactory6>           s_DXGIFactory;
+ComPtr<IDXGISwapChain3>         s_DXGISwapChain;
+std::vector<DXGI_ADAPTER_DESC1> s_DXGIAdapterInfos;
+int                             s_DXGIAdapterIndex;
+std::vector<DXGI_OUTPUT_DESC>   s_DXGIOutputInfos;
+DXGI_SWAP_EFFECT                s_DXGISwapEffect;
+
+// Adapted from all found DXGI_ADAPTER_DESC1 for easy display in the UI.
+std::vector<std::string> s_DXGIAdapterNames;
+
+// Log buffer memory.
+std::shared_ptr<std::stringstream> s_LoggerMemory;
+
+// Various flags to keep the state of the process in sync with user selection.
+bool s_RecreateDevice    = false;
+bool s_RecreateSwapChain = false;
+
 // Utility Prototypes
 // -----------------------------
 
+std::string FromWideStr(std::wstring str);
+
 // Creates an OS window for Microsoft Windows.
-void CreateOperatingSystemWindow(HINSTANCE hInstance);
+void CreateOperatingSystemWindow();
+
+// Enumerate a list of graphics adapters that support our usage of D3D12.
+void EnumerateSupportedAdapters();
+
+// Release all D3D12 resources.
+void ReleaseGraphicsRuntime();
 
 // Create a DXGI swap-chain for the OS window.
 void InitializeGraphicsRuntime();
 
-// Load PSOs, simulation state, command buffers, etc.
-void LoadResources();
-
 // Command list recording and queue submission for current swap chain image.
 void Render();
+
+// For per-frame imgui window creation.
+void RenderInterface();
 
 // Message handle for a Microsoft Windows window.
 LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
-// Helper function for acquiring the first available hardware adapter that supports Direct3D 12.
-// If no such adapter can be found, *ppAdapter will be set to nullptr.
-_Use_decl_annotations_ void GetHardwareAdapter(IDXGIFactory1* pFactory, IDXGIAdapter1** ppAdapter, bool requestHighPerformanceAdapter = false);
+// Create or sync DXGI, OS Window, Swapchain, HDR/SDR, V-Sync with current settings.
+void ValidatePresentation();
 
 // Crashing utility.
 void ThrowIfFailed(HRESULT hr);
@@ -66,15 +102,48 @@ void WaitForPreviousFrame();
 
 _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
 {
-    CreateOperatingSystemWindow(hInstance);
+    // Declare this process to be high DPI aware, and prevent automatic scaling
+    HINSTANCE hUser32 = LoadLibrary("user32.dll");
+
+    if (hUser32)
+    {
+        typedef BOOL(WINAPI * LPSetProcessDPIAware)(void);
+
+        LPSetProcessDPIAware pSetProcessDPIAware = (LPSetProcessDPIAware)GetProcAddress(hUser32, "SetProcessDPIAware");
+
+        if (pSetProcessDPIAware)
+            pSetProcessDPIAware();
+
+        FreeLibrary(hUser32);
+    }
+
+    s_Instance = hInstance;
+
+    // Flush on critical events since we usually fatally crash the app right after.
+    spdlog::flush_on(spdlog::level::critical);
+
+    // Configure logging.
+    // --------------------------------------
+
+    s_LoggerMemory  = std::make_shared<std::stringstream>();
+    auto loggerSink = std::make_shared<spdlog::sinks::ostream_sink_mt>(*s_LoggerMemory);
+    auto logger     = std::make_shared<spdlog::logger>("", loggerSink);
+
+    spdlog::set_default_logger(logger);
+    spdlog::set_pattern("%^[%l] %v%$");
+
+#ifdef _DEBUG
+    spdlog::set_level(spdlog::level::debug);
+#endif
+
+    EnumerateSupportedAdapters();
+
+    CreateOperatingSystemWindow();
 
     InitializeGraphicsRuntime();
 
-    LoadResources();
-
     ShowWindow(s_Window, nCmdShow);
 
-    // Main sample loop.
     MSG msg = {};
     while (msg.message != WM_QUIT)
     {
@@ -86,10 +155,7 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
         }
     }
 
-    // Tear down ImGui.
-    ImGui_ImplDX12_Shutdown();
-    ImGui_ImplWin32_Shutdown();
-    ImGui::DestroyContext();
+    ReleaseGraphicsRuntime();
 
     // Return this part of the WM_QUIT message to Windows.
     return static_cast<char>(msg.wParam);
@@ -98,14 +164,109 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
 // Utiliy Implementations
 // -----------------------------
 
-void CreateOperatingSystemWindow(HINSTANCE hInstance)
+std::string FromWideStr(std::wstring wstr)
 {
+    // Determine the size of the resulting string
+    int size = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, nullptr, 0, nullptr, nullptr);
+
+    if (size == 0)
+        throw std::runtime_error("Failed to convert wide string to string.");
+
+    // Allocate a buffer for the resulting string
+    std::string str(size - 1, '\0'); // size - 1 because size includes the null terminator
+    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &str[0], size, nullptr, nullptr);
+
+    return str;
+}
+
+template <typename T>
+bool EnumDropdown(const char* name, int* selectedEnumIndex)
+{
+    constexpr auto enumNames = magic_enum::enum_names<T>();
+
+    std::vector<const char*> enumNameStrings(enumNames.size());
+
+    for (uint32_t enumIndex = 0U; enumIndex < enumNames.size(); enumIndex++)
+        enumNameStrings[enumIndex] = enumNames[enumIndex].data();
+
+    return ImGui::Combo(name, selectedEnumIndex, enumNameStrings.data(), static_cast<int>(enumNameStrings.size()));
+}
+
+bool StringListDropdown(const char* name, std::vector<std::string>& strings, int& selectedIndex)
+{
+    bool modified = false;
+
+    if (ImGui::BeginCombo(name, strings[selectedIndex].c_str()))
+    {
+        for (int i = 0; i < strings.size(); i++)
+        {
+            if (ImGui::Selectable(strings[i].c_str(), selectedIndex == i))
+            {
+                selectedIndex = i;
+                modified      = true;
+            }
+
+            if (selectedIndex == i)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+
+    return modified;
+}
+
+void EnumerateSupportedAdapters()
+{
+    ComPtr<IDXGIFactory6> pDXGIFactory;
+    ThrowIfFailed(CreateDXGIFactory2(0u, IID_PPV_ARGS(pDXGIFactory.GetAddressOf())));
+
+    ComPtr<IDXGIAdapter1> pAdapter;
+
+    s_DXGIAdapterInfos.clear();
+    s_DXGIAdapterNames.clear();
+
+    for (UINT adapterIndex = 0;
+         SUCCEEDED(pDXGIFactory->EnumAdapterByGpuPreference(adapterIndex, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&pAdapter)));
+         ++adapterIndex)
+    {
+        if (!SUCCEEDED(D3D12CreateDevice(pAdapter.Get(), D3D_FEATURE_LEVEL_12_0, _uuidof(ID3D12Device), nullptr)))
+            continue;
+
+        DXGI_ADAPTER_DESC1 desc;
+        pAdapter->GetDesc1(&desc);
+
+        s_DXGIAdapterInfos.push_back(desc);
+    }
+
+    // Extract a list of supported adapter names for presentation to the user.
+    std::transform(s_DXGIAdapterInfos.begin(),
+                   s_DXGIAdapterInfos.end(),
+                   std::back_inserter(s_DXGIAdapterNames),
+                   [](const DXGI_ADAPTER_DESC1& adapter) { return FromWideStr(adapter.Description); });
+
+    if (!s_DXGIAdapterInfos.empty())
+        return;
+
+    MessageBox(nullptr,
+               "No D3D12 Adapters found that support D3D_FEATURE_LEVEL_12_2. The app will now exit.",
+               "Image Quality Reference",
+               MB_ICONERROR | MB_OK);
+
+    // Nothing to do if no devices are found.
+    exit(1);
+}
+
+void CreateOperatingSystemWindow()
+{
+    if (s_Window != nullptr)
+        DestroyWindow(s_Window);
+
     WNDCLASSEX windowClass = { 0 };
     {
         windowClass.cbSize        = sizeof(WNDCLASSEX);
         windowClass.style         = CS_HREDRAW | CS_VREDRAW;
         windowClass.lpfnWndProc   = WindowProc;
-        windowClass.hInstance     = hInstance;
+        windowClass.hInstance     = s_Instance;
         windowClass.hCursor       = LoadCursor(NULL, IDC_ARROW);
         windowClass.lpszClassName = "ImageQualityReference";
     }
@@ -125,47 +286,80 @@ void CreateOperatingSystemWindow(HINSTANCE hInstance)
                             windowRect.bottom - windowRect.top,
                             nullptr, // We have no parent window.
                             nullptr, // We aren't using menus.
-                            hInstance,
+                            s_Instance,
                             nullptr);
 }
-#include <atlbase.h>
+
+void ReleaseGraphicsRuntime()
+{
+    ImGui_ImplDX12_Shutdown();
+    ImGui_ImplWin32_Shutdown();
+    ImGui::DestroyContext();
+
+    s_DSRDevice->Release();
+    s_CommandAllocator->Release();
+    s_CommandList->Release();
+    s_CommandQueue->Release();
+    s_SRVDescriptorHeap->Release();
+    s_RTVDescriptorHeap->Release();
+    s_Fence->Release();
+
+    for (auto& swapChainImageView : s_SwapChainImages)
+        swapChainImageView->Release();
+
+    // Important to reset, not release here.
+    s_DXGISwapChain.Reset();
+
+    s_DXGIAdapter->Release();
+    s_DXGIFactory->Release();
+    s_LogicalDevice->Release();
+}
+
 void InitializeGraphicsRuntime()
 {
     UINT dxgiFactoryFlags = 0;
 
-#if defined(_DEBUG)
+#ifdef _DEBUG
+    // Enable additional debug layers.
+    dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
+#endif
+
+    ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(s_DXGIFactory.GetAddressOf())));
+
+    ComPtr<IDXGIAdapter1> pAdapter;
+    for (UINT adapterIndex = 0; SUCCEEDED(s_DXGIFactory->EnumAdapters1(adapterIndex, &pAdapter)); ++adapterIndex)
+    {
+        DXGI_ADAPTER_DESC1 desc;
+        pAdapter->GetDesc1(&desc);
+
+        if (s_DXGIAdapterInfos[s_DXGIAdapterIndex].DeviceId == desc.DeviceId)
+            break;
+    }
+
+    // Assign the new adapter.
+    s_DXGIAdapter = pAdapter.Detach();
+
+#ifdef _DEBUG
     // Enable the debug layer (requires the Graphics Tools "optional feature").
     // NOTE: Enabling the debug layer after device creation will invalidate the active device.
     {
         ComPtr<ID3D12Debug> debugController;
         if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
-        {
             debugController->EnableDebugLayer();
-
-            // Enable additional debug layers.
-            dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
-        }
     }
 #endif
 
-    ComPtr<IDXGIFactory4> factory;
-    ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
-
-    ComPtr<IDXGIAdapter1> hardwareAdapter;
-    GetHardwareAdapter(factory.Get(), &hardwareAdapter);
-
-    ThrowIfFailed(D3D12CreateDevice(hardwareAdapter.Get(), D3D_FEATURE_LEVEL_12_2, IID_PPV_ARGS(&s_LogicalDevice)));
+    ThrowIfFailed(D3D12CreateDevice(s_DXGIAdapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(s_LogicalDevice.GetAddressOf())));
 
     // Describe and create the command queue.
     D3D12_COMMAND_QUEUE_DESC queueDesc = {};
     queueDesc.Flags                    = D3D12_COMMAND_QUEUE_FLAG_NONE;
     queueDesc.Type                     = D3D12_COMMAND_LIST_TYPE_DIRECT;
-
-    ThrowIfFailed(s_LogicalDevice->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&s_CommandQueue)));
+    ThrowIfFailed(s_LogicalDevice->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(s_CommandQueue.GetAddressOf())));
 
     // Describe and create the swap chain.
     DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
-    swapChainDesc.BufferCount           = SWAP_CHAIN_IMAGE_COUNT;
+    swapChainDesc.BufferCount           = NUM_BACKBUFFER;
     swapChainDesc.Width                 = VIEWPORT_W;
     swapChainDesc.Height                = VIEWPORT_H;
     swapChainDesc.Format                = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -174,33 +368,27 @@ void InitializeGraphicsRuntime()
     swapChainDesc.SampleDesc.Count      = 1;
 
     ComPtr<IDXGISwapChain1> swapChain;
-    ThrowIfFailed(factory->CreateSwapChainForHwnd(s_CommandQueue.Get(), // Swap chain needs the queue so that it can force a flush on it.
-                                                  s_Window,
-                                                  &swapChainDesc,
-                                                  nullptr,
-                                                  nullptr,
-                                                  &swapChain));
+    ThrowIfFailed(s_DXGIFactory->CreateSwapChainForHwnd(s_CommandQueue.Get(), s_Window, &swapChainDesc, nullptr, nullptr, swapChain.GetAddressOf()));
 
     // Does not support fullscreen transitions.
-    ThrowIfFailed(factory->MakeWindowAssociation(s_Window, DXGI_MWA_NO_ALT_ENTER));
+    ThrowIfFailed(s_DXGIFactory->MakeWindowAssociation(s_Window, DXGI_MWA_NO_ALT_ENTER));
 
-    ThrowIfFailed(swapChain.As(&s_SwapChain));
-    s_CurrentSwapChainImageIndex = s_SwapChain->GetCurrentBackBufferIndex();
+    ThrowIfFailed(swapChain.As(&s_DXGISwapChain));
+    s_CurrentSwapChainImageIndex = s_DXGISwapChain->GetCurrentBackBufferIndex();
 
     // Descriptor heaps.
     {
-        // Describe and create a render target view (RTV) descriptor heap.
         D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
-        rtvHeapDesc.NumDescriptors             = SWAP_CHAIN_IMAGE_COUNT;
+        rtvHeapDesc.NumDescriptors             = NUM_BACKBUFFER;
         rtvHeapDesc.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
         rtvHeapDesc.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-        ThrowIfFailed(s_LogicalDevice->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&s_RTVDescriptorHeap)));
+        ThrowIfFailed(s_LogicalDevice->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(s_RTVDescriptorHeap.GetAddressOf())));
 
         D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
         srvHeapDesc.NumDescriptors             = 32;
         srvHeapDesc.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
         srvHeapDesc.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-        ThrowIfFailed(s_LogicalDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&s_SRVDescriptorHeap)));
+        ThrowIfFailed(s_LogicalDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(s_SRVDescriptorHeap.GetAddressOf())));
 
         s_RTVDescriptorSize = s_LogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
         s_SRVDescriptorSize = s_LogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -211,21 +399,21 @@ void InitializeGraphicsRuntime()
         CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(s_RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 
         // Create a RTV for each frame.
-        for (UINT n = 0; n < SWAP_CHAIN_IMAGE_COUNT; n++)
+        for (UINT n = 0; n < NUM_BACKBUFFER; n++)
         {
-            ThrowIfFailed(s_SwapChain->GetBuffer(n, IID_PPV_ARGS(&s_SwapChainImages[n])));
+            ThrowIfFailed(s_DXGISwapChain->GetBuffer(n, IID_PPV_ARGS(s_SwapChainImages[n].GetAddressOf())));
             s_LogicalDevice->CreateRenderTargetView(s_SwapChainImages[n].Get(), nullptr, rtvHandle);
             rtvHandle.Offset(1, s_RTVDescriptorSize);
         }
     }
 
-    ThrowIfFailed(s_LogicalDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&s_CommandAllocator)));
+    ThrowIfFailed(s_LogicalDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(s_CommandAllocator.GetAddressOf())));
 
     // Initialize DirectSR device.
     {
         ComPtr<ID3D12DSRDeviceFactory> pDSRDeviceFactory;
         ThrowIfFailed(D3D12GetInterface(CLSID_D3D12DSRDeviceFactory, IID_PPV_ARGS(&pDSRDeviceFactory)));
-        ThrowIfFailed(pDSRDeviceFactory->CreateDSRDevice(s_LogicalDevice.Get(), 1, IID_PPV_ARGS(&s_DSRDevice)));
+        ThrowIfFailed(pDSRDeviceFactory->CreateDSRDevice(s_LogicalDevice.Get(), 1, IID_PPV_ARGS(s_DSRDevice.GetAddressOf())));
 
         UINT numDsrVariants = s_DSRDevice->GetNumSuperResVariants();
 
@@ -233,7 +421,38 @@ void InitializeGraphicsRuntime()
         {
             DSR_SUPERRES_VARIANT_DESC variantDesc;
             ThrowIfFailed(s_DSRDevice->GetSuperResVariantDesc(index, &variantDesc));
+
+            spdlog::info(variantDesc.VariantName);
         }
+    }
+
+    // Create the command list.
+    ThrowIfFailed(s_LogicalDevice->CreateCommandList(0,
+                                                     D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                                     s_CommandAllocator.Get(),
+                                                     nullptr,
+                                                     IID_PPV_ARGS(s_CommandList.GetAddressOf())));
+
+    // Command lists are created in the recording state, but there is nothing
+    // to record yet. The main loop expects it to be closed, so close it now.
+    ThrowIfFailed(s_CommandList->Close());
+
+    // Create synchronization objects and wait until assets have been uploaded to the GPU.
+    {
+        ThrowIfFailed(s_LogicalDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(s_Fence.GetAddressOf())));
+        s_FenceValue = 1;
+
+        // Create an event handle to use for frame synchronization.
+        if (!s_FenceOperatingSystemEvent)
+            s_FenceOperatingSystemEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+
+        if (s_FenceOperatingSystemEvent == nullptr)
+            ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+
+        // Wait for the command list to execute; we are reusing the same command
+        // list in our main loop but for now, we just want to wait for setup to
+        // complete before continuing.
+        WaitForPreviousFrame();
     }
 
     // Initialize ImGui.
@@ -254,7 +473,7 @@ void InitializeGraphicsRuntime()
         auto srvHeapGPUHandle = s_SRVDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
 
         ImGui_ImplDX12_Init(s_LogicalDevice.Get(),
-                            SWAP_CHAIN_IMAGE_COUNT,
+                            NUM_BACKBUFFER,
                             DXGI_FORMAT_R8G8B8A8_UNORM,
                             s_SRVDescriptorHeap.Get(),
                             srvHeapCPUHandle,
@@ -262,44 +481,66 @@ void InitializeGraphicsRuntime()
     }
 }
 
-void LoadResources()
+void RenderInterface()
 {
-    // Create the command list.
-    ThrowIfFailed(
-        s_LogicalDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, s_CommandAllocator.Get(), nullptr, IID_PPV_ARGS(&s_CommandList)));
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, FLT_MAX));
+    ImGui::SetNextWindowBgAlpha(0.2F);
 
-    // Command lists are created in the recording state, but there is nothing
-    // to record yet. The main loop expects it to be closed, so close it now.
-    ThrowIfFailed(s_CommandList->Close());
+    if (!ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize))
+        return;
 
-    // Create synchronization objects and wait until assets have been uploaded to the GPU.
+    ImGui::SeparatorText("Presentation");
     {
-        ThrowIfFailed(s_LogicalDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&s_Fence)));
-        s_FenceValue = 1;
+        // Windowed / Borderless / Fullscreen
+        EnumDropdown<WindowMode>("Window Mode", reinterpret_cast<int*>(&s_WindowMode));
 
-        // Create an event handle to use for frame synchronization.
-        s_FenceOperatingSystemEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+        s_RecreateDevice |= StringListDropdown("Adapters", s_DXGIAdapterNames, s_DXGIAdapterIndex);
 
-        if (s_FenceOperatingSystemEvent == nullptr)
-            ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+        s_RecreateSwapChain |= EnumDropdown<DXGI_SWAP_EFFECT>("DXGI Swap Effect", reinterpret_cast<int*>(&s_DXGISwapEffect));
 
-        // Wait for the command list to execute; we are reusing the same command
-        // list in our main loop but for now, we just want to wait for setup to
-        // complete before continuing.
-        WaitForPreviousFrame();
+        // Backbuffer Format
+
+        // Buffering
+        static int s_BufferingCount = 1;
+        s_RecreateSwapChain |= ImGui::SliderInt("Buffering", &s_BufferingCount, 1, 3);
+
+        // V-Sync
     }
+
+    ImGui::SeparatorText("Content");
+    {
+        ImGui::Text("TODO");
+    }
+
+    if (ImGui::BeginChild("LogSubWindow", ImVec2(600, 200), 1, ImGuiWindowFlags_HorizontalScrollbar))
+    {
+        ImGui::TextUnformatted(s_LoggerMemory->str().c_str());
+
+        if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
+            ImGui::SetScrollHereY(1.0F);
+    }
+    ImGui::EndChild();
+
+    ImGui::End();
 }
 
 void Render()
 {
-    // Command list allocators can only be reset when the associated
-    // command lists have finished execution on the GPU; apps should use
-    // fences to determine GPU execution progress.
+    if (s_RecreateDevice)
+    {
+        // Wait for GPU to be clear of work + force release
+        WaitForPreviousFrame();
+
+        ReleaseGraphicsRuntime();
+
+        InitializeGraphicsRuntime();
+
+        s_RecreateDevice = false;
+    }
+
     ThrowIfFailed(s_CommandAllocator->Reset());
 
-    // However, when ExecuteCommandList() is called on a particular command
-    // list, that command list can then be reset at any time and must be before
-    // re-recording.
     ThrowIfFailed(s_CommandList->Reset(s_CommandAllocator.Get(), nullptr));
 
     // Start the Dear ImGui frame
@@ -318,12 +559,10 @@ void Render()
                                             s_RTVDescriptorSize);
     s_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
-    // Record commands.
     const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
     s_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 
-    static bool s_ShowWindow = true;
-    ImGui::ShowDemoWindow(&s_ShowWindow);
+    RenderInterface();
     ImGui::Render();
 
     s_CommandList->SetDescriptorHeaps(1, s_SRVDescriptorHeap.GetAddressOf());
@@ -342,7 +581,7 @@ void Render()
     s_CommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
     // Present the frame.
-    ThrowIfFailed(s_SwapChain->Present(1, 0));
+    ThrowIfFailed(s_DXGISwapChain->Present(1, 0));
 
     WaitForPreviousFrame();
 }
@@ -361,70 +600,7 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
         case WM_DESTROY: PostQuitMessage(0); return 0;
     }
 
-    // Handle any messages the switch statement didn't.
     return DefWindowProc(hWnd, message, wParam, lParam);
-}
-
-// Helper function for acquiring the first available hardware adapter that supports Direct3D 12.
-// If no such adapter can be found, *ppAdapter will be set to nullptr.
-_Use_decl_annotations_ void GetHardwareAdapter(IDXGIFactory1* pFactory, IDXGIAdapter1** ppAdapter, bool requestHighPerformanceAdapter)
-{
-    *ppAdapter = nullptr;
-
-    ComPtr<IDXGIAdapter1> adapter;
-
-    ComPtr<IDXGIFactory6> factory6;
-    if (SUCCEEDED(pFactory->QueryInterface(IID_PPV_ARGS(&factory6))))
-    {
-        for (UINT adapterIndex = 0; SUCCEEDED(factory6->EnumAdapterByGpuPreference(
-                 adapterIndex,
-                 requestHighPerformanceAdapter == true ? DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE : DXGI_GPU_PREFERENCE_UNSPECIFIED,
-                 IID_PPV_ARGS(&adapter)));
-             ++adapterIndex)
-        {
-            DXGI_ADAPTER_DESC1 desc;
-            adapter->GetDesc1(&desc);
-
-            if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
-            {
-                // Don't select the Basic Render Driver adapter.
-                // If you want a software adapter, pass in "/warp" on the command line.
-                continue;
-            }
-
-            // Check to see whether the adapter supports Direct3D 12, but don't create the
-            // actual device yet.
-            if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_2, _uuidof(ID3D12Device), nullptr)))
-            {
-                break;
-            }
-        }
-    }
-
-    if (adapter.Get() == nullptr)
-    {
-        for (UINT adapterIndex = 0; SUCCEEDED(pFactory->EnumAdapters1(adapterIndex, &adapter)); ++adapterIndex)
-        {
-            DXGI_ADAPTER_DESC1 desc;
-            adapter->GetDesc1(&desc);
-
-            if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
-            {
-                // Don't select the Basic Render Driver adapter.
-                // If you want a software adapter, pass in "/warp" on the command line.
-                continue;
-            }
-
-            // Check to see whether the adapter supports Direct3D 12, but don't create the
-            // actual device yet.
-            if (SUCCEEDED(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_2, _uuidof(ID3D12Device), nullptr)))
-            {
-                break;
-            }
-        }
-    }
-
-    *ppAdapter = adapter.Detach();
 }
 
 inline std::string HrToString(HRESULT hr)
@@ -456,15 +632,8 @@ void ThrowIfFailed(HRESULT hr)
 
 void WaitForPreviousFrame()
 {
-    // WAITING FOR THE FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
-    // This is code implemented as such for simplicity. The D3D12HelloFrameBuffering
-    // sample illustrates how to use fences for efficient resource usage and to
-    // maximize GPU utilization.
-
-    // Signal and increment the fence value.
-    const UINT64 fence = s_FenceValue;
+    const UINT64 fence = s_FenceValue++;
     ThrowIfFailed(s_CommandQueue->Signal(s_Fence.Get(), fence));
-    s_FenceValue++;
 
     // Wait until the previous frame is finished.
     if (s_Fence->GetCompletedValue() < fence)
@@ -473,5 +642,5 @@ void WaitForPreviousFrame()
         WaitForSingleObject(s_FenceOperatingSystemEvent, INFINITE);
     }
 
-    s_CurrentSwapChainImageIndex = s_SwapChain->GetCurrentBackBufferIndex();
+    s_CurrentSwapChainImageIndex = s_DXGISwapChain->GetCurrentBackBufferIndex();
 }
