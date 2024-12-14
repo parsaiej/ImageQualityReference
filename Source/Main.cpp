@@ -30,14 +30,15 @@ int s_CurrentSwapChainImageIndex;
 int s_RTVDescriptorSize;
 int s_SRVDescriptorSize;
 
-ComPtr<ID3D12Device>              s_LogicalDevice     = nullptr;
-ComPtr<IDSRDevice>                s_DSRDevice         = nullptr;
-ComPtr<ID3D12CommandQueue>        s_CommandQueue      = nullptr;
-ComPtr<ID3D12DescriptorHeap>      s_RTVDescriptorHeap = nullptr;
-ComPtr<ID3D12DescriptorHeap>      s_SRVDescriptorHeap = nullptr;
-ComPtr<ID3D12CommandAllocator>    s_CommandAllocator  = nullptr;
-ComPtr<ID3D12GraphicsCommandList> s_CommandList       = nullptr;
-ComPtr<ID3D12Resource>            s_SwapChainImages[NUM_BACKBUFFER];
+ComPtr<ID3D12Device>                   s_LogicalDevice     = nullptr;
+ComPtr<IDSRDevice>                     s_DSRDevice         = nullptr;
+ComPtr<ID3D12CommandQueue>             s_CommandQueue      = nullptr;
+ComPtr<ID3D12DescriptorHeap>           s_RTVDescriptorHeap = nullptr;
+ComPtr<ID3D12DescriptorHeap>           s_SRVDescriptorHeap = nullptr;
+ComPtr<ID3D12CommandAllocator>         s_CommandAllocator  = nullptr;
+ComPtr<ID3D12GraphicsCommandList>      s_CommandList       = nullptr;
+ComPtr<ID3D12Resource>                 s_SwapChainImages[NUM_BACKBUFFER];
+std::vector<DSR_SUPERRES_VARIANT_DESC> s_DSRVariantDescs;
 
 ComPtr<ID3D12Fence> s_Fence                     = nullptr;
 HANDLE              s_FenceOperatingSystemEvent = nullptr;
@@ -57,6 +58,11 @@ std::vector<std::string> s_DXGIAdapterNames;
 
 // Log buffer memory.
 std::shared_ptr<std::stringstream> s_LoggerMemory;
+
+// Ring buffer for frame time (ms)
+int                k_FrameTimeHistorySize = 2048;
+int                s_FrameTimeIndex;
+std::vector<float> s_FrameTimesMs;
 
 // Various flags to keep the state of the process in sync with user selection.
 bool s_RecreateDevice    = false;
@@ -121,6 +127,9 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
 
     // Flush on critical events since we usually fatally crash the app right after.
     spdlog::flush_on(spdlog::level::critical);
+
+    // Frame tine ring buffer holds 2k frames of history.
+    s_FrameTimesMs.resize(k_FrameTimeHistorySize);
 
     // Configure logging.
     // --------------------------------------
@@ -278,7 +287,7 @@ void CreateOperatingSystemWindow()
 
     // Create the window and store a handle to it.
     s_Window = CreateWindow(windowClass.lpszClassName,
-                            "ImageQualityReference",
+                            "Image Quality Reference",
                             WS_OVERLAPPEDWINDOW,
                             CW_USEDEFAULT,
                             CW_USEDEFAULT,
@@ -415,14 +424,14 @@ void InitializeGraphicsRuntime()
         ThrowIfFailed(D3D12GetInterface(CLSID_D3D12DSRDeviceFactory, IID_PPV_ARGS(&pDSRDeviceFactory)));
         ThrowIfFailed(pDSRDeviceFactory->CreateDSRDevice(s_LogicalDevice.Get(), 1, IID_PPV_ARGS(s_DSRDevice.GetAddressOf())));
 
-        UINT numDsrVariants = s_DSRDevice->GetNumSuperResVariants();
+        s_DSRVariantDescs.resize(s_DSRDevice->GetNumSuperResVariants());
 
-        for (UINT index = 0; index < numDsrVariants; index++)
+        for (UINT variantIndex = 0; variantIndex < s_DSRVariantDescs.size(); variantIndex++)
         {
             DSR_SUPERRES_VARIANT_DESC variantDesc;
-            ThrowIfFailed(s_DSRDevice->GetSuperResVariantDesc(index, &variantDesc));
+            ThrowIfFailed(s_DSRDevice->GetSuperResVariantDesc(variantIndex, &variantDesc));
 
-            spdlog::info(variantDesc.VariantName);
+            s_DSRVariantDescs[variantIndex] = variantDesc;
         }
     }
 
@@ -466,7 +475,6 @@ void InitializeGraphicsRuntime()
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;  // Enable Gamepad Controls
 
-        ImGui::StyleColorsDark();
         ImGui_ImplWin32_Init(s_Window);
 
         auto srvHeapCPUHandle = s_SRVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
@@ -479,13 +487,48 @@ void InitializeGraphicsRuntime()
                             srvHeapCPUHandle,
                             srvHeapGPUHandle);
     }
+
+    // Log a message containing information about the adapter.
+    {
+
+        spdlog::info("--------- Initialized D3D12 Runtime ----------");
+
+        std::stringstream runtimeInfoMsg;
+
+        runtimeInfoMsg << std::endl << std::endl;
+        runtimeInfoMsg << std::left << std::setw(13) << "Device: " << s_DXGIAdapterNames[s_DXGIAdapterIndex] << std::endl;
+        runtimeInfoMsg << std::left << std::setw(13)
+                       << "VRAM: " << s_DXGIAdapterInfos[s_DXGIAdapterIndex].DedicatedVideoMemory / static_cast<float>(1024 * 1024 * 1024)
+                       << " GB (Dedicated)" << std::endl;
+        runtimeInfoMsg << std::left << std::setw(13) << "DirectSR: ";
+
+        if (s_DSRVariantDescs.empty())
+            runtimeInfoMsg << "None" << std::endl;
+        else
+        {
+            for (const auto& variantDesc : s_DSRVariantDescs)
+            {
+                runtimeInfoMsg << variantDesc.VariantName << std::endl;
+                runtimeInfoMsg << std::left << std::setw(13) << " ";
+            }
+        }
+
+        spdlog::info(runtimeInfoMsg.str());
+    }
 }
 
 void RenderInterface()
 {
     ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(ImVec2(VIEWPORT_W * 0.25, VIEWPORT_H));
     ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, FLT_MAX));
     ImGui::SetNextWindowBgAlpha(0.2F);
+
+    // Set a custom text color (e.g., red)
+    ImVec4 textColor = ImVec4(0.0f, 0.0f, 0.0f, 1.0f); // Red color (RGBA)
+
+    // Push the new text color onto the style stack
+    ImGui::PushStyleColor(ImGuiCol_Text, textColor);
 
     if (!ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize))
         return;
@@ -506,6 +549,10 @@ void RenderInterface()
         s_RecreateSwapChain |= ImGui::SliderInt("Buffering", &s_BufferingCount, 1, 3);
 
         // V-Sync
+
+        // Frames in Flight
+        static int s_FramesInFlightCount = 1;
+        ImGui::SliderInt("Frames in Flight", &s_FramesInFlightCount, 1, 16);
     }
 
     ImGui::SeparatorText("Content");
@@ -513,7 +560,23 @@ void RenderInterface()
         ImGui::Text("TODO");
     }
 
-    if (ImGui::BeginChild("LogSubWindow", ImVec2(600, 200), 1, ImGuiWindowFlags_HorizontalScrollbar))
+    /*
+    ImGui::SeparatorText("Performance");
+    {
+        ImGui::PlotLines(std::format("Frame Time ({} ms)", s_FrameTimesMs[s_FrameTimeIndex]).c_str(),
+                         s_FrameTimesMs.data(),
+                         s_FrameTimeIndex,
+                         0,
+                         nullptr,
+                         0.0f,
+                         100.0f,
+                         ImVec2(600, 200));
+    }
+    */
+
+    ImGui::SeparatorText("Log");
+
+    if (ImGui::BeginChild("LogSubWindow", ImVec2(0, 0), 1, ImGuiWindowFlags_HorizontalScrollbar))
     {
         ImGui::TextUnformatted(s_LoggerMemory->str().c_str());
 
@@ -523,21 +586,48 @@ void RenderInterface()
     ImGui::EndChild();
 
     ImGui::End();
+
+    // Pop the style color to restore the default text color
+    ImGui::PopStyleColor();
 }
+
+class FrameTimeAppender
+{
+public:
+
+    FrameTimeAppender() { m_Begin = std::chrono::high_resolution_clock::now(); }
+
+    ~FrameTimeAppender()
+    {
+        auto end = std::chrono::high_resolution_clock::now();
+
+        s_FrameTimesMs[s_FrameTimeIndex] = static_cast<float>((end - m_Begin).count());
+
+        if (s_FrameTimeIndex + 1 >= k_FrameTimeHistorySize)
+            s_FrameTimeIndex = 0;
+        else
+            s_FrameTimeIndex++;
+    }
+
+private:
+
+    std::chrono::time_point<std::chrono::steady_clock> m_Begin;
+};
 
 void Render()
 {
     if (s_RecreateDevice)
     {
-        // Wait for GPU to be clear of work + force release
         WaitForPreviousFrame();
 
         ReleaseGraphicsRuntime();
 
         InitializeGraphicsRuntime();
 
-        s_RecreateDevice = false;
+        s_RecreateDevice = !s_RecreateDevice;
     }
+
+    FrameTimeAppender frameTime;
 
     ThrowIfFailed(s_CommandAllocator->Reset());
 
@@ -559,8 +649,19 @@ void Render()
                                             s_RTVDescriptorSize);
     s_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
-    const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
-    s_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
+    // Clear the overlay ui region.
+    {
+        const float clearColor[]   = { 1.0f, 1.0f, 1.0f, 1.0f };
+        D3D12_RECT  clearColorRect = { 0, 0, static_cast<LONG>(0.25L * VIEWPORT_W), VIEWPORT_H };
+        s_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 1, &clearColorRect);
+    }
+
+    // CLear the normal rendering viewport region.
+    {
+        const float clearColor[]   = { 0.2f, 0.2f, 0.75f, 1.0f };
+        D3D12_RECT  clearColorRect = { static_cast<LONG>(0.25L * VIEWPORT_W), 0, VIEWPORT_W, VIEWPORT_H };
+        s_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 1, &clearColorRect);
+    }
 
     RenderInterface();
     ImGui::Render();
