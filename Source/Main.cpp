@@ -4,6 +4,9 @@ extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 715; }
 extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\"; }
 // clang-format on
 
+// Import the imgui style.
+#include "OverlayStyle.h"
+
 #define VIEWPORT_W     1920
 #define VIEWPORT_H     1080
 #define NUM_BACKBUFFER 2
@@ -30,15 +33,18 @@ int s_CurrentSwapChainImageIndex;
 int s_RTVDescriptorSize;
 int s_SRVDescriptorSize;
 
-ComPtr<ID3D12Device>                   s_LogicalDevice     = nullptr;
-ComPtr<IDSRDevice>                     s_DSRDevice         = nullptr;
-ComPtr<ID3D12CommandQueue>             s_CommandQueue      = nullptr;
-ComPtr<ID3D12DescriptorHeap>           s_RTVDescriptorHeap = nullptr;
-ComPtr<ID3D12DescriptorHeap>           s_SRVDescriptorHeap = nullptr;
-ComPtr<ID3D12CommandAllocator>         s_CommandAllocator  = nullptr;
-ComPtr<ID3D12GraphicsCommandList>      s_CommandList       = nullptr;
-ComPtr<ID3D12Resource>                 s_SwapChainImages[NUM_BACKBUFFER];
+ComPtr<ID3D12Device>              s_LogicalDevice     = nullptr;
+ComPtr<IDSRDevice>                s_DSRDevice         = nullptr;
+ComPtr<ID3D12CommandQueue>        s_CommandQueue      = nullptr;
+ComPtr<ID3D12DescriptorHeap>      s_RTVDescriptorHeap = nullptr;
+ComPtr<ID3D12DescriptorHeap>      s_SRVDescriptorHeap = nullptr;
+ComPtr<ID3D12CommandAllocator>    s_CommandAllocator  = nullptr;
+ComPtr<ID3D12GraphicsCommandList> s_CommandList       = nullptr;
+ComPtr<ID3D12Resource>            s_SwapChainImages[NUM_BACKBUFFER];
+
+int                                    s_DSRVariantIndex;
 std::vector<DSR_SUPERRES_VARIANT_DESC> s_DSRVariantDescs;
+std::vector<std::string>               s_DSRVariantNames;
 
 ComPtr<ID3D12Fence> s_Fence                     = nullptr;
 HANDLE              s_FenceOperatingSystemEvent = nullptr;
@@ -60,8 +66,9 @@ std::vector<std::string> s_DXGIAdapterNames;
 std::shared_ptr<std::stringstream> s_LoggerMemory;
 
 // Ring buffer for frame time (ms)
-int                k_FrameTimeHistorySize = 2048;
+int                k_FrameTimeHistorySize = 100;
 int                s_FrameTimeIndex;
+int                s_FrameTimeCount;
 std::vector<float> s_FrameTimesMs;
 
 // Various flags to keep the state of the process in sync with user selection.
@@ -139,7 +146,7 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
     auto logger     = std::make_shared<spdlog::logger>("", loggerSink);
 
     spdlog::set_default_logger(logger);
-    spdlog::set_pattern("%^[%l] %v%$");
+    spdlog::set_pattern("%v");
 
 #ifdef _DEBUG
     spdlog::set_level(spdlog::level::debug);
@@ -172,6 +179,41 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
 
 // Utiliy Implementations
 // -----------------------------
+
+struct ScrollingBuffer
+{
+    ScrollingBuffer(int maxSize = 8000)
+    {
+        this->maxSize = maxSize;
+        offset        = 0;
+        data.reserve(maxSize);
+    }
+
+    void AddPoint(float x, float y)
+    {
+        if (data.size() < maxSize)
+            data.push_back(ImVec2(x, y));
+        else
+        {
+            data[offset] = ImVec2(x, y);
+
+            offset = (offset + 1) % maxSize;
+        }
+    }
+
+    void Erase()
+    {
+        if (data.size() > 0)
+        {
+            data.shrink(0);
+            offset = 0;
+        }
+    }
+
+    int              maxSize;
+    int              offset;
+    ImVector<ImVec2> data;
+};
 
 std::string FromWideStr(std::wstring wstr)
 {
@@ -303,6 +345,7 @@ void ReleaseGraphicsRuntime()
 {
     ImGui_ImplDX12_Shutdown();
     ImGui_ImplWin32_Shutdown();
+    ImPlot::DestroyContext();
     ImGui::DestroyContext();
 
     s_DSRDevice->Release();
@@ -403,15 +446,14 @@ void InitializeGraphicsRuntime()
         s_SRVDescriptorSize = s_LogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     }
 
-    // Create frame resources.
+    // Swapchain Image Views.
     {
         CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(s_RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 
-        // Create a RTV for each frame.
-        for (UINT n = 0; n < NUM_BACKBUFFER; n++)
+        for (UINT swapChainImageIndex = 0; swapChainImageIndex < NUM_BACKBUFFER; swapChainImageIndex++)
         {
-            ThrowIfFailed(s_DXGISwapChain->GetBuffer(n, IID_PPV_ARGS(s_SwapChainImages[n].GetAddressOf())));
-            s_LogicalDevice->CreateRenderTargetView(s_SwapChainImages[n].Get(), nullptr, rtvHandle);
+            ThrowIfFailed(s_DXGISwapChain->GetBuffer(swapChainImageIndex, IID_PPV_ARGS(s_SwapChainImages[swapChainImageIndex].GetAddressOf())));
+            s_LogicalDevice->CreateRenderTargetView(s_SwapChainImages[swapChainImageIndex].Get(), nullptr, rtvHandle);
             rtvHandle.Offset(1, s_RTVDescriptorSize);
         }
     }
@@ -433,6 +475,15 @@ void InitializeGraphicsRuntime()
 
             s_DSRVariantDescs[variantIndex] = variantDesc;
         }
+
+        s_DSRVariantNames.clear();
+        s_DSRVariantIndex = 0;
+
+        // Enumerate variants names.
+        std::transform(s_DSRVariantDescs.begin(),
+                       s_DSRVariantDescs.end(),
+                       std::back_inserter(s_DSRVariantNames),
+                       [](const DSR_SUPERRES_VARIANT_DESC& variantDesc) { return variantDesc.VariantName; });
     }
 
     // Create the command list.
@@ -468,6 +519,7 @@ void InitializeGraphicsRuntime()
     {
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
+        ImPlot::CreateContext();
 
         ImGuiIO& io = ImGui::GetIO();
 
@@ -486,11 +538,12 @@ void InitializeGraphicsRuntime()
                             s_SRVDescriptorHeap.Get(),
                             srvHeapCPUHandle,
                             srvHeapGPUHandle);
+
+        SetStyle();
     }
 
     // Log a message containing information about the adapter.
     {
-
         spdlog::info("--------- Initialized D3D12 Runtime ----------");
 
         std::stringstream runtimeInfoMsg;
@@ -513,6 +566,8 @@ void InitializeGraphicsRuntime()
             }
         }
 
+        runtimeInfoMsg << std::endl;
+
         spdlog::info(runtimeInfoMsg.str());
     }
 }
@@ -522,13 +577,6 @@ void RenderInterface()
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImVec2(VIEWPORT_W * 0.25, VIEWPORT_H));
     ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, FLT_MAX));
-    ImGui::SetNextWindowBgAlpha(0.2F);
-
-    // Set a custom text color (e.g., red)
-    ImVec4 textColor = ImVec4(0.0f, 0.0f, 0.0f, 1.0f); // Red color (RGBA)
-
-    // Push the new text color onto the style stack
-    ImGui::PushStyleColor(ImGuiCol_Text, textColor);
 
     if (!ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize))
         return;
@@ -541,6 +589,9 @@ void RenderInterface()
         s_RecreateDevice |= StringListDropdown("Adapters", s_DXGIAdapterNames, s_DXGIAdapterIndex);
 
         s_RecreateSwapChain |= EnumDropdown<DXGI_SWAP_EFFECT>("DXGI Swap Effect", reinterpret_cast<int*>(&s_DXGISwapEffect));
+
+        if (!s_DSRVariantDescs.empty())
+            StringListDropdown("DirectSR Algorithm", s_DSRVariantNames, s_DSRVariantIndex);
 
         // Backbuffer Format
 
@@ -560,19 +611,39 @@ void RenderInterface()
         ImGui::Text("TODO");
     }
 
-    /*
+    ImPlot::ShowDemoWindow();
+
     ImGui::SeparatorText("Performance");
     {
-        ImGui::PlotLines(std::format("Frame Time ({} ms)", s_FrameTimesMs[s_FrameTimeIndex]).c_str(),
-                         s_FrameTimesMs.data(),
-                         s_FrameTimeIndex,
-                         0,
-                         nullptr,
-                         0.0f,
-                         100.0f,
-                         ImVec2(600, 200));
+        static ScrollingBuffer frameTimeBuffer;
+
+        static float elapsedTime = 0;
+        elapsedTime += ImGui::GetIO().DeltaTime;
+
+        frameTimeBuffer.AddPoint(elapsedTime, ImGui::GetIO().DeltaTime);
+
+        static float history = 10.0f;
+
+        static ImPlotAxisFlags flags = ImPlotAxisFlags_NoTickLabels;
+
+        if (ImPlot::BeginPlot("##Scrolling", ImVec2(-1, 150)))
+        {
+            ImPlot::SetupAxes(nullptr, nullptr, flags, flags);
+            ImPlot::SetupAxisLimits(ImAxis_X1, elapsedTime - history, elapsedTime, ImGuiCond_Always);
+            ImPlot::SetupAxisLimits(ImAxis_Y1, 0, 1.0f / 60.0f);
+            ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.5f);
+
+            ImPlot::PlotLine("Frame Time (ms)",
+                             &frameTimeBuffer.data[0].x,
+                             &frameTimeBuffer.data[0].y,
+                             frameTimeBuffer.data.size(),
+                             0,
+                             frameTimeBuffer.offset,
+                             2 * sizeof(float));
+
+            ImPlot::EndPlot();
+        }
     }
-    */
 
     ImGui::SeparatorText("Log");
 
@@ -586,33 +657,7 @@ void RenderInterface()
     ImGui::EndChild();
 
     ImGui::End();
-
-    // Pop the style color to restore the default text color
-    ImGui::PopStyleColor();
 }
-
-class FrameTimeAppender
-{
-public:
-
-    FrameTimeAppender() { m_Begin = std::chrono::high_resolution_clock::now(); }
-
-    ~FrameTimeAppender()
-    {
-        auto end = std::chrono::high_resolution_clock::now();
-
-        s_FrameTimesMs[s_FrameTimeIndex] = static_cast<float>((end - m_Begin).count());
-
-        if (s_FrameTimeIndex + 1 >= k_FrameTimeHistorySize)
-            s_FrameTimeIndex = 0;
-        else
-            s_FrameTimeIndex++;
-    }
-
-private:
-
-    std::chrono::time_point<std::chrono::steady_clock> m_Begin;
-};
 
 void Render()
 {
@@ -626,8 +671,6 @@ void Render()
 
         s_RecreateDevice = !s_RecreateDevice;
     }
-
-    FrameTimeAppender frameTime;
 
     ThrowIfFailed(s_CommandAllocator->Reset());
 

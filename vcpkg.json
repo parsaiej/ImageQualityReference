@@ -2,6 +2,7 @@
     "dependencies": [
       { "name": "spdlog", "features": ["wchar"] },
       { "name": "imgui", "features": ["dx12-binding", "win32-binding"] },
+      "implot",
       "joltphysics",
       "magic-enum"
     ]

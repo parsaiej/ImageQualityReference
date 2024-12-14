@@ -26,6 +26,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(spdlog          CONFIG REQUIRED)
 find_package(Jolt            CONFIG REQUIRED)
 find_package(imgui           CONFIG REQUIRED)
+find_package(implot          CONFIG REQUIRED)
 find_package(magic_enum      CONFIG REQUIRED)
 
 # Executable
@@ -60,6 +61,7 @@ target_link_libraries(ImageQualityReference PRIVATE
     dxgi
     d3d12
     imgui::imgui
+    implot::implot
     magic_enum::magic_enum
 )
 
