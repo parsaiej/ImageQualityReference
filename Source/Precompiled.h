@@ -24,6 +24,8 @@
 #include <Windows.h>
 #include <format>
 
+#include "ScrollingBuffer.h"
+
 using namespace Microsoft::WRL;
 
 #endif
