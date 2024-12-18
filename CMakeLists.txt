@@ -28,12 +28,14 @@ find_package(Jolt            CONFIG REQUIRED)
 find_package(imgui           CONFIG REQUIRED)
 find_package(implot          CONFIG REQUIRED)
 find_package(magic_enum      CONFIG REQUIRED)
+find_package(Stb                    REQUIRED)
 
 # Executable
 # --------------------------------
 
 add_executable(ImageQualityReference WIN32
     Source/Main.cpp
+    Source/Precompiled.cpp
 )
 
 # PCH
@@ -50,6 +52,7 @@ target_precompile_headers(ImageQualityReference PRIVATE Source/Precompiled.h)
 target_include_directories(ImageQualityReference BEFORE PRIVATE 
     $ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/include/
     $ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/include/d3dx12/
+    ${Stb_INCLUDE_DIR}
 )
 
 # Link

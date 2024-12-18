@@ -4,6 +4,7 @@
       { "name": "imgui", "features": ["dx12-binding", "win32-binding"] },
       "implot",
       "joltphysics",
-      "magic-enum"
+      "magic-enum",
+      "stb"
     ]
   }

@@ -11,6 +11,7 @@
 #include <d3dx12.h>
 #include <dxgi1_6.h>
 #include <directsr.h>
+#include <DirectXMath.h>
 #include <wrl.h>
 
 #include <imgui.h>
@@ -21,10 +22,13 @@
 
 #include <magic_enum/magic_enum.hpp>
 
+#include <stb_image.h>
+
 #include <Windows.h>
 #include <format>
 
 #include "ScrollingBuffer.h"
+#include "SplashImageBytes.h"
 
 using namespace Microsoft::WRL;
 

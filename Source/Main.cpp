@@ -7,9 +7,6 @@ extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\
 // Import the imgui style.
 #include "OverlayStyle.h"
 
-#define VIEWPORT_W 1920
-#define VIEWPORT_H 1080
-
 // Options
 // -----------------------------
 
@@ -24,6 +21,14 @@ enum SwapEffect
 {
     FlipSequential,
     FlipDiscard
+};
+
+enum UpdateFlags : uint32_t
+{
+    None            = 0,
+    Window          = 1 << 0,
+    SwapChain       = 1 << 1,
+    GraphicsRuntime = 1 << 2
 };
 
 // State
@@ -45,8 +50,9 @@ ComPtr<ID3D12DescriptorHeap>      s_RTVDescriptorHeap = nullptr;
 ComPtr<ID3D12DescriptorHeap>      s_SRVDescriptorHeap = nullptr;
 ComPtr<ID3D12CommandAllocator>    s_CommandAllocator  = nullptr;
 ComPtr<ID3D12GraphicsCommandList> s_CommandList       = nullptr;
-std::vector<ID3D12Resource*>      s_SwapChainImages;
-uint32_t                          s_SwapChainImageCount = 2;
+
+std::vector<ID3D12Resource*> s_SwapChainImages;
+uint32_t                     s_SwapChainImageCount = 2;
 
 int                                    s_DSRVariantIndex;
 std::vector<DSR_SUPERRES_VARIANT_DESC> s_DSRVariantDescs;
@@ -62,8 +68,9 @@ ComPtr<IDXGIFactory6>           s_DXGIFactory;
 ComPtr<IDXGISwapChain3>         s_DXGISwapChain;
 std::vector<DXGI_ADAPTER_DESC1> s_DXGIAdapterInfos;
 int                             s_DXGIAdapterIndex;
-std::vector<DXGI_OUTPUT_DESC>   s_DXGIOutputInfos;
 SwapEffect                      s_DXGISwapEffect;
+std::vector<IDXGIOutput*>       s_DXGIOutputs;
+std::vector<std::string>        s_DXGIOutputNames;
 
 // Adapted from all found DXGI_ADAPTER_DESC1 for easy display in the UI.
 std::vector<std::string> s_DXGIAdapterNames;
@@ -74,10 +81,26 @@ std::shared_ptr<std::stringstream> s_LoggerMemory;
 // Ring buffer for frame time (ms)
 static ScrollingBuffer s_FrameTimeBuffer;
 
+// V-Sync Interval requested by user.
+int s_SyncInterval;
+
+// Current update flags for the frame.
+uint32_t s_UpdateFlags;
+
 // Various flags to keep the state of the process in sync with user selection.
 bool s_RecreateDevice    = false;
 bool s_RecreateSwapChain = false;
 bool s_UpdateWindow      = false;
+
+// Internal (pre-upscaled) viewport resolution.
+DirectX::XMINT2 s_ViewportSizeInternal { 1920, 1080 };
+
+// Output (post-upscaled) viewport resolution.
+DirectX::XMINT2 s_ViewportSizeOutput { s_ViewportSizeInternal };
+
+// Cached window rect if going from fullscreen -> window.
+RECT s_WindowRect;
+UINT s_WindowStyle = WS_OVERLAPPEDWINDOW;
 
 // Utility Prototypes
 // -----------------------------
@@ -116,28 +139,16 @@ void ValidatePresentation();
 void ThrowIfFailed(HRESULT hr);
 
 // Use fence primitives to pause the thread until the previous swap-chain image has finished being drawn and presented.
-void WaitForPreviousFrame();
+void WaitForDevice();
+
+// Syncs runtime context with user settings.
+void SyncSettings();
 
 // Entry-point
 // -----------------------------
 
 _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
 {
-    // Declare this process to be high DPI aware, and prevent automatic scaling
-    HINSTANCE hUser32 = LoadLibrary("user32.dll");
-
-    if (hUser32)
-    {
-        typedef BOOL(WINAPI * LPSetProcessDPIAware)(void);
-
-        LPSetProcessDPIAware pSetProcessDPIAware = (LPSetProcessDPIAware)GetProcAddress(hUser32, "SetProcessDPIAware");
-
-        if (pSetProcessDPIAware)
-            pSetProcessDPIAware();
-
-        FreeLibrary(hUser32);
-    }
-
     s_Instance = hInstance;
 
     // Flush on critical events since we usually fatally crash the app right after.
@@ -181,6 +192,8 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
     // Return this part of the WM_QUIT message to Windows.
     return static_cast<char>(msg.wParam);
 }
+
+inline UpdateFlags operator|(UpdateFlags a, UpdateFlags b) { return static_cast<UpdateFlags>(static_cast<int>(a) | static_cast<int>(b)); }
 
 std::string FromWideStr(std::wstring wstr)
 {
@@ -276,9 +289,6 @@ void EnumerateSupportedAdapters()
 
 void CreateOperatingSystemWindow()
 {
-    if (s_Window != nullptr)
-        DestroyWindow(s_Window);
-
     WNDCLASSEX windowClass = { 0 };
     {
         windowClass.cbSize        = sizeof(WNDCLASSEX);
@@ -290,20 +300,18 @@ void CreateOperatingSystemWindow()
     }
     RegisterClassEx(&windowClass);
 
-    // Hardcode for now.
-    RECT windowRect = { 0, 0, VIEWPORT_W, VIEWPORT_H };
-    AdjustWindowRect(&windowRect, WS_OVERLAPPEDWINDOW, FALSE);
+    RECT windowRect = { 0, 0, s_ViewportSizeOutput.x, s_ViewportSizeOutput.y };
+    AdjustWindowRect(&windowRect, s_WindowStyle, FALSE);
 
-    // Create the window and store a handle to it.
     s_Window = CreateWindow(windowClass.lpszClassName,
                             "Image Quality Reference",
-                            WS_OVERLAPPEDWINDOW,
+                            s_WindowStyle,
                             CW_USEDEFAULT,
                             CW_USEDEFAULT,
                             windowRect.right - windowRect.left,
                             windowRect.bottom - windowRect.top,
-                            nullptr, // We have no parent window.
-                            nullptr, // We aren't using menus.
+                            nullptr,
+                            nullptr,
                             s_Instance,
                             nullptr);
 }
@@ -312,11 +320,12 @@ void CreateSwapChain()
 {
     DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
     swapChainDesc.BufferCount           = s_SwapChainImageCount;
-    swapChainDesc.Width                 = VIEWPORT_W;
-    swapChainDesc.Height                = VIEWPORT_H;
+    swapChainDesc.Width                 = static_cast<UINT>(s_ViewportSizeOutput.x);
+    swapChainDesc.Height                = static_cast<UINT>(s_ViewportSizeOutput.y);
     swapChainDesc.Format                = DXGI_FORMAT_R8G8B8A8_UNORM;
     swapChainDesc.BufferUsage           = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     swapChainDesc.SampleDesc.Count      = 1;
+    swapChainDesc.Flags                 = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING | DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
 
     switch (s_DXGISwapEffect)
     {
@@ -348,13 +357,15 @@ void CreateSwapChain()
 
 void ReleaseSwapChain()
 {
+    // Need to force disable fullscreen in order to destroy swap chain.
+    ThrowIfFailed(s_DXGISwapChain->SetFullscreenState(false, nullptr));
+
     for (auto& swapChainImageView : s_SwapChainImages)
     {
         if (swapChainImageView)
             swapChainImageView->Release();
     }
 
-    // Important to reset, not release here.
     s_DXGISwapChain.Reset();
 }
 
@@ -383,6 +394,48 @@ void ReleaseGraphicsRuntime(bool releaseComPtr)
     s_LogicalDevice->Release();
 }
 
+void EnumerateOutputDisplays()
+{
+    // NOTE: Some systems (i.e. laptops with dedicate GPU) fail to enumrate any outputs
+    //       due to ownership of the output being with the integrated GPU (i.e. Intel).
+    //       Thus, we enumerate all adapters first and check each output that adapter owns.
+
+    for (auto& pOutput : s_DXGIOutputs)
+    {
+        if (pOutput)
+            pOutput->Release();
+    }
+
+    s_DXGIOutputs.clear();
+    s_DXGIOutputNames.clear();
+
+    IDXGIAdapter* pAdapter;
+    UINT          adapterIndex = 0u;
+
+    while (s_DXGIFactory->EnumAdapters(adapterIndex++, &pAdapter) != DXGI_ERROR_NOT_FOUND)
+    {
+        IDXGIOutput* pOutput;
+        UINT         outputIndex = 0u;
+
+        while (pAdapter->EnumOutputs(outputIndex++, &pOutput) != DXGI_ERROR_NOT_FOUND)
+            s_DXGIOutputs.push_back(pOutput);
+
+        pAdapter->Release();
+    }
+
+    // Extract list of names for overlay.
+    std::transform(s_DXGIOutputs.begin(),
+                   s_DXGIOutputs.end(),
+                   std::back_inserter(s_DXGIOutputNames),
+                   [](IDXGIOutput* pOutput)
+                   {
+                       DXGI_OUTPUT_DESC outputInfo;
+                       pOutput->GetDesc(&outputInfo);
+
+                       return FromWideStr(outputInfo.DeviceName);
+                   });
+}
+
 void InitializeGraphicsRuntime()
 {
     UINT dxgiFactoryFlags = 0;
@@ -404,6 +457,8 @@ void InitializeGraphicsRuntime()
     }
 
     s_DXGIAdapter = pAdapter.Detach();
+
+    EnumerateOutputDisplays();
 
 #ifdef _DEBUG
     // Enable the debug layer (requires the Graphics Tools "optional feature").
@@ -494,7 +549,7 @@ void InitializeGraphicsRuntime()
         // Wait for the command list to execute; we are reusing the same command
         // list in our main loop but for now, we just want to wait for setup to
         // complete before continuing.
-        WaitForPreviousFrame();
+        WaitForDevice();
     }
 
     // Initialize ImGui.
@@ -555,32 +610,36 @@ void InitializeGraphicsRuntime()
 void RenderInterface()
 {
     ImGui::SetNextWindowPos(ImVec2(0, 0));
-    ImGui::SetNextWindowSize(ImVec2(VIEWPORT_W * 0.25, VIEWPORT_H));
+    ImGui::SetNextWindowSize(ImVec2((float)s_ViewportSizeOutput.x * 0.25f, (float)s_ViewportSizeOutput.y));
     ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, FLT_MAX));
 
     if (!ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize))
         return;
 
+    ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.5f);
+
     ImGui::SeparatorText("Presentation");
     {
-        // Windowed / Borderless / Fullscreen
-        s_UpdateWindow |= EnumDropdown<WindowMode>("Window Mode", reinterpret_cast<int*>(&s_WindowMode));
+        static int displayINdex;
+        StringListDropdown("Display", s_DXGIOutputNames, displayINdex);
 
-        s_RecreateDevice |= StringListDropdown("Adapters", s_DXGIAdapterNames, s_DXGIAdapterIndex);
+        if (StringListDropdown("Adapter", s_DXGIAdapterNames, s_DXGIAdapterIndex))
+            s_UpdateFlags |= UpdateFlags::GraphicsRuntime;
 
-        s_RecreateSwapChain |= EnumDropdown<SwapEffect>("DXGI Swap Effect", reinterpret_cast<int*>(&s_DXGISwapEffect));
+        if (EnumDropdown<WindowMode>("Window Mode", reinterpret_cast<int*>(&s_WindowMode)))
+            s_UpdateFlags |= UpdateFlags::Window;
+
+        if (EnumDropdown<SwapEffect>("Swap Effect", reinterpret_cast<int*>(&s_DXGISwapEffect)))
+            s_UpdateFlags |= UpdateFlags::SwapChain;
 
         if (!s_DSRVariantDescs.empty())
             StringListDropdown("DirectSR Algorithm", s_DSRVariantNames, s_DSRVariantIndex);
 
-        // Backbuffer Format
+        if (ImGui::SliderInt("Buffering", reinterpret_cast<int*>(&s_SwapChainImageCount), 2, DXGI_MAX_SWAP_CHAIN_BUFFERS - 1))
+            s_UpdateFlags |= UpdateFlags::SwapChain;
 
-        // Buffering
-        s_RecreateSwapChain |= ImGui::SliderInt("Buffering", reinterpret_cast<int*>(&s_SwapChainImageCount), 2, DXGI_MAX_SWAP_CHAIN_BUFFERS - 1);
+        ImGui::SliderInt("Vertical Sync Interval", &s_SyncInterval, 0, 4);
 
-        // V-Sync
-
-        // Frames in Flight
         static int s_FramesInFlightCount = 1;
         ImGui::SliderInt("Frames in Flight", &s_FramesInFlightCount, 1, 16);
     }
@@ -636,71 +695,138 @@ void RenderInterface()
     }
     ImGui::EndChild();
 
+    ImGui::PopItemWidth();
+
     ImGui::End();
+}
+
+void UpdateWindow()
+{
+    switch (s_WindowMode)
+    {
+        case WindowMode::Windowed:
+        {
+            // Restore the window's attributes and size.
+            SetWindowLong(s_Window, GWL_STYLE, s_WindowStyle);
+
+            SetWindowPos(s_Window,
+                         HWND_NOTOPMOST,
+                         s_WindowRect.left,
+                         s_WindowRect.top,
+                         s_WindowRect.right - s_WindowRect.left,
+                         s_WindowRect.bottom - s_WindowRect.top,
+                         SWP_FRAMECHANGED | SWP_NOACTIVATE);
+
+            ShowWindow(s_Window, SW_NORMAL);
+
+            break;
+        }
+
+        case WindowMode::Borderless:
+        {
+            // Save the old window rect so we can restore it when exiting fullscreen mode.
+            GetWindowRect(s_Window, &s_WindowRect);
+
+            // Make the window borderless so that the client area can fill the screen.
+            SetWindowLong(s_Window, GWL_STYLE, s_WindowStyle & ~(WS_CAPTION | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU | WS_THICKFRAME));
+
+            RECT fullscreenWindowRect;
+
+            try
+            {
+                if (s_DXGISwapChain)
+                {
+                    // Get the settings of the display on which the app's window is currently displayed
+                    ComPtr<IDXGIOutput> pOutput;
+                    ThrowIfFailed(s_DXGISwapChain->GetContainingOutput(&pOutput));
+
+                    DXGI_OUTPUT_DESC Desc;
+                    ThrowIfFailed(pOutput->GetDesc(&Desc));
+
+                    fullscreenWindowRect = Desc.DesktopCoordinates;
+                }
+                else
+                {
+                    // Fallback to EnumDisplaySettings implementation
+                    throw std::exception();
+                }
+            }
+            catch (std::exception& e)
+            {
+                UNREFERENCED_PARAMETER(e);
+
+                // Get the settings of the primary display
+                DEVMODE devMode = {};
+                devMode.dmSize  = sizeof(DEVMODE);
+                EnumDisplaySettings(nullptr, ENUM_CURRENT_SETTINGS, &devMode);
+
+                fullscreenWindowRect = { devMode.dmPosition.x,
+                                         devMode.dmPosition.y,
+                                         devMode.dmPosition.x + static_cast<LONG>(devMode.dmPelsWidth),
+                                         devMode.dmPosition.y + static_cast<LONG>(devMode.dmPelsHeight) };
+            }
+
+            SetWindowPos(s_Window,
+                         HWND_TOPMOST,
+                         fullscreenWindowRect.left,
+                         fullscreenWindowRect.top,
+                         fullscreenWindowRect.right,
+                         fullscreenWindowRect.bottom,
+                         SWP_FRAMECHANGED | SWP_NOACTIVATE);
+
+            ShowWindow(s_Window, SW_MAXIMIZE);
+
+            break;
+        }
+
+        case WindowMode::ExclusiveFullscreen:
+        {
+            WaitForDevice();
+
+            if (SUCCEEDED(s_DXGISwapChain->SetFullscreenState(true, nullptr)))
+                break;
+
+            spdlog::warn("Failed to go fullscreen. Check that the currently selected adapter has ownership of the display.");
+
+            // Return to windowed state.
+            s_WindowMode = WindowMode::Windowed;
+        }
+    };
 }
 
 void SyncSettings()
 {
-    if (s_RecreateDevice)
+    if ((s_UpdateFlags & UpdateFlags::GraphicsRuntime) != 0)
     {
-        WaitForPreviousFrame();
+        WaitForDevice();
 
         spdlog::info("Updating Graphics Adapter");
 
         ReleaseGraphicsRuntime(true);
 
         InitializeGraphicsRuntime();
-
-        s_RecreateDevice = !s_RecreateDevice;
     }
 
-    if (s_RecreateSwapChain)
+    if ((s_UpdateFlags & UpdateFlags::SwapChain) != 0)
     {
-        WaitForPreviousFrame();
+        WaitForDevice();
 
         spdlog::info("Updating Swap Chain");
 
         ReleaseSwapChain();
 
         CreateSwapChain();
-
-        s_RecreateSwapChain = !s_RecreateSwapChain;
     }
 
-    if (s_UpdateWindow)
+    if ((s_UpdateFlags & UpdateFlags::Window) != 0)
     {
         spdlog::info("Updating Window");
 
-        LONG style = GetWindowLong(s_Window, GWL_STYLE);
-
-        switch (s_WindowMode)
-        {
-            case WindowMode::Windowed:
-            {
-                // Add standard borders and title bar back
-                style |= WS_CAPTION | WS_BORDER | WS_THICKFRAME;
-                break;
-            }
-
-            case WindowMode::Borderless:
-            {
-                // Remove borders and title bar to make it borderless
-                style &= ~(WS_CAPTION | WS_BORDER | WS_THICKFRAME);
-                style |= WS_POPUP;
-                break;
-            }
-
-            default: break;
-        }
-
-        // Set the new window style
-        SetWindowLong(s_Window, GWL_STYLE, style);
-
-        // Apply the new style and reposition the window (optional)
-        SetWindowPos(s_Window, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED);
-
-        s_UpdateWindow = false;
+        UpdateWindow();
     }
+
+    // Clear update flags.
+    s_UpdateFlags = 0u;
 }
 
 void Render()
@@ -730,14 +856,14 @@ void Render()
     // Clear the overlay ui region.
     {
         const float clearColor[]   = { 1.0f, 1.0f, 1.0f, 1.0f };
-        D3D12_RECT  clearColorRect = { 0, 0, static_cast<LONG>(0.25L * VIEWPORT_W), VIEWPORT_H };
+        D3D12_RECT  clearColorRect = { 0, 0, static_cast<LONG>(0.25L * s_ViewportSizeOutput.x), s_ViewportSizeOutput.y };
         s_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 1, &clearColorRect);
     }
 
     // CLear the normal rendering viewport region.
     {
         const float clearColor[]   = { 0.2f, 0.2f, 0.75f, 1.0f };
-        D3D12_RECT  clearColorRect = { static_cast<LONG>(0.25L * VIEWPORT_W), 0, VIEWPORT_W, VIEWPORT_H };
+        D3D12_RECT  clearColorRect = { static_cast<LONG>(0.25L * s_ViewportSizeOutput.x), 0, s_ViewportSizeOutput.x, s_ViewportSizeOutput.y };
         s_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 1, &clearColorRect);
     }
 
@@ -760,9 +886,9 @@ void Render()
     s_CommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
     // Present the frame.
-    ThrowIfFailed(s_DXGISwapChain->Present(1, 0));
+    ThrowIfFailed(s_DXGISwapChain->Present(s_SyncInterval, 0));
 
-    WaitForPreviousFrame();
+    WaitForDevice();
 }
 
 // Forward declare message handler from imgui_impl_win32.cpp
@@ -777,6 +903,47 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
     {
         case WM_PAINT  : Render(); return 0;
         case WM_DESTROY: PostQuitMessage(0); return 0;
+
+        case WM_SIZE:
+        {
+            RECT clientRect = {};
+            GetClientRect(hWnd, &clientRect);
+
+            s_ViewportSizeOutput.x = clientRect.right - clientRect.left;
+            s_ViewportSizeOutput.y = clientRect.bottom - clientRect.top;
+
+            WaitForDevice();
+
+            // Release swap chain image views.
+            for (auto& swapChainImageView : s_SwapChainImages)
+                swapChainImageView->Release();
+
+            s_SwapChainImages.resize(s_SwapChainImageCount);
+
+            DXGI_SWAP_CHAIN_DESC swapChainInfo = {};
+            s_DXGISwapChain->GetDesc(&swapChainInfo);
+
+            ThrowIfFailed(s_DXGISwapChain->ResizeBuffers(s_SwapChainImageCount,
+                                                         s_ViewportSizeOutput.x,
+                                                         s_ViewportSizeOutput.y,
+                                                         swapChainInfo.BufferDesc.Format,
+                                                         swapChainInfo.Flags));
+
+            s_CurrentSwapChainImageIndex = s_DXGISwapChain->GetCurrentBackBufferIndex();
+
+            CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(s_RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+
+            // Create a RTV for each frame.
+            for (UINT n = 0; n < s_SwapChainImageCount; n++)
+            {
+                ThrowIfFailed(s_DXGISwapChain->GetBuffer(n, IID_PPV_ARGS(&s_SwapChainImages[n])));
+                s_LogicalDevice->CreateRenderTargetView(s_SwapChainImages[n], nullptr, rtvHandle);
+
+                rtvHandle.Offset(1, s_RTVDescriptorSize);
+            }
+
+            return 0;
+        }
     }
 
     return DefWindowProc(hWnd, message, wParam, lParam);
@@ -809,17 +976,15 @@ void ThrowIfFailed(HRESULT hr)
     }
 }
 
-void WaitForPreviousFrame()
+void WaitForDevice()
 {
-    const UINT64 fence = s_FenceValue++;
-    ThrowIfFailed(s_CommandQueue->Signal(s_Fence.Get(), fence));
+    ThrowIfFailed(s_CommandQueue->Signal(s_Fence.Get(), s_FenceValue));
 
     // Wait until the previous frame is finished.
-    if (s_Fence->GetCompletedValue() < fence)
-    {
-        ThrowIfFailed(s_Fence->SetEventOnCompletion(fence, s_FenceOperatingSystemEvent));
-        WaitForSingleObject(s_FenceOperatingSystemEvent, INFINITE);
-    }
+    ThrowIfFailed(s_Fence->SetEventOnCompletion(s_FenceValue, s_FenceOperatingSystemEvent));
+    WaitForSingleObject(s_FenceOperatingSystemEvent, INFINITE);
+
+    s_FenceValue++;
 
     s_CurrentSwapChainImageIndex = s_DXGISwapChain->GetCurrentBackBufferIndex();
 }
