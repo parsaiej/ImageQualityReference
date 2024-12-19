@@ -1,5 +1,7 @@
 // clang-format off
 // Tell Windows to load the Agility SDK DLLs. 
+#include <cstring>
+#include <imgui.h>
 extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 715; }
 extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\"; }
 // clang-format on
@@ -231,6 +233,11 @@ bool StringListDropdown(const char* name, std::vector<std::string>& strings, int
 {
     bool modified = false;
 
+    if (strcmp(name, "Display") == 0 && s_WindowMode == WindowMode::Windowed)
+    {
+        ImGui::BeginDisabled(true);
+    }
+
     if (ImGui::BeginCombo(name, strings[selectedIndex].c_str()))
     {
         for (int i = 0; i < strings.size(); i++)
@@ -240,11 +247,15 @@ bool StringListDropdown(const char* name, std::vector<std::string>& strings, int
                 selectedIndex = i;
                 modified      = true;
             }
-
             if (selectedIndex == i)
                 ImGui::SetItemDefaultFocus();
         }
         ImGui::EndCombo();
+    }
+
+    if (strcmp(name, "Display") == 0 && s_WindowMode == WindowMode::Windowed)
+    {
+        ImGui::EndDisabled();
     }
 
     return modified;
