@@ -74,6 +74,7 @@ std::vector<IDXGIOutput*>       s_DXGIOutputs;
 std::vector<std::string>        s_DXGIOutputNames;
 std::vector<DXGI_MODE_DESC>     s_DXGIDisplayModes;
 std::vector<std::string>        s_DXGIDisplayModesStr;
+int                             s_DXGIOutputsIndex;
 
 // Adapted from all found DXGI_ADAPTER_DESC1 for easy display in the UI.
 std::vector<std::string> s_DXGIAdapterNames;
@@ -295,7 +296,7 @@ void EnumerateSupportedAdapters()
 
     MessageBox(nullptr,
                "No D3D12 Adapters found that support D3D_FEATURE_LEVEL_12_0. The app will now exit.",
-               "Image Quality Reference",
+               "Image Clarity Reference",
                MB_ICONERROR | MB_OK);
 
     // Nothing to do if no devices are found.
@@ -311,7 +312,7 @@ void CreateOperatingSystemWindow()
         windowClass.lpfnWndProc   = WindowProc;
         windowClass.hInstance     = s_Instance;
         windowClass.hCursor       = LoadCursor(NULL, IDC_ARROW);
-        windowClass.lpszClassName = "ImageQualityReference";
+        windowClass.lpszClassName = "ImageClarityReference";
     }
     RegisterClassEx(&windowClass);
 
@@ -319,7 +320,7 @@ void CreateOperatingSystemWindow()
     AdjustWindowRect(&windowRect, s_WindowStyle, FALSE);
 
     s_Window = CreateWindow(windowClass.lpszClassName,
-                            "Image Quality Reference",
+                            "Image Clarity Reference",
                             s_WindowStyle,
                             CW_USEDEFAULT,
                             CW_USEDEFAULT,
@@ -703,12 +704,11 @@ void RenderInterface()
     if (!ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize))
         return;
 
-    ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.5f);
+    ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.7f);
 
-    ImGui::SeparatorText("Presentation");
+    if (ImGui::CollapsingHeader("Presentation", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        static int displayINdex;
-        StringListDropdown("Display", s_DXGIOutputNames, displayINdex);
+        StringListDropdown("Display", s_DXGIOutputNames, s_DXGIOutputsIndex);
 
         if (StringListDropdown("Adapter", s_DXGIAdapterNames, s_DXGIAdapterIndex))
             s_UpdateFlags |= UpdateFlags::GraphicsRuntime;
@@ -728,18 +728,13 @@ void RenderInterface()
         if (ImGui::SliderInt("Buffering", reinterpret_cast<int*>(&s_SwapChainImageCount), 2, DXGI_MAX_SWAP_CHAIN_BUFFERS - 1))
             s_UpdateFlags |= UpdateFlags::SwapChain;
 
-        ImGui::SliderInt("Vertical Sync Interval", &s_SyncInterval, 0, 4);
+        ImGui::SliderInt("V-Sync Interval", &s_SyncInterval, 0, 4);
 
         static int s_FramesInFlightCount = 1;
         ImGui::SliderInt("Frames in Flight", &s_FramesInFlightCount, 1, 16);
     }
 
-    ImGui::SeparatorText("Content");
-    {
-        ImGui::Text("TODO");
-    }
-
-    ImGui::SeparatorText("Performance");
+    if (ImGui::CollapsingHeader("Performance", ImGuiTreeNodeFlags_DefaultOpen))
     {
         static float elapsedTime = 0;
         elapsedTime += s_DeltaTime;
@@ -749,7 +744,7 @@ void RenderInterface()
         s_DeltaTimeBuffer.AddPoint(elapsedTime, deltaTimeMs);
         s_DeltaTimeMovingAverageBuffer.AddPoint(elapsedTime, s_DeltaTimeMovingAverage.GetAverage());
 
-        static float history = 10.0f;
+        static float history = 3.0f;
 
         if (ImPlot::BeginPlot("##Scrolling", ImVec2(-1, 150)))
         {
@@ -778,19 +773,17 @@ void RenderInterface()
         }
     }
 
-    if (ImGui::Button("Exit"))
-        exit(0);
-
-    ImGui::SeparatorText("Log");
-
-    if (ImGui::BeginChild("LogSubWindow", ImVec2(0, 0), 1, ImGuiWindowFlags_HorizontalScrollbar))
+    if (ImGui::CollapsingHeader("Log", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        ImGui::TextUnformatted(s_LoggerMemory->str().c_str());
+        if (ImGui::BeginChild("LogSubWindow", ImVec2(0, 200), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar))
+        {
+            ImGui::TextUnformatted(s_LoggerMemory->str().c_str());
 
-        if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
-            ImGui::SetScrollHereY(1.0F);
+            if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
+                ImGui::SetScrollHereY(1.0F);
+        }
+        ImGui::EndChild();
     }
-    ImGui::EndChild();
 
     ImGui::PopItemWidth();
 
