@@ -698,7 +698,7 @@ void RenderInterface()
         {
             ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, 0x0);
             ImPlot::SetupAxisLimits(ImAxis_X1, elapsedTime - history, elapsedTime, ImGuiCond_Always);
-            ImPlot::SetupAxisLimits(ImAxis_Y1, 0, deltaTimeMsMax, ImGuiCond_Always);
+            ImPlot::SetupAxisLimits(ImAxis_Y1, 0, s_DeltaTimeMovingAverage.GetAverage() * 2.0, ImGuiCond_Always);
             ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.5f);
 
             ImPlot::PlotLine("Frame Time (ms)",
