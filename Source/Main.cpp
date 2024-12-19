@@ -30,7 +30,8 @@ enum UpdateFlags : uint32_t
     None            = 0,
     Window          = 1 << 0,
     SwapChain       = 1 << 1,
-    GraphicsRuntime = 1 << 2
+    GraphicsRuntime = 1 << 2,
+    Display         = 1 << 3
 };
 
 // State
@@ -657,7 +658,8 @@ void RenderInterface()
     ImGui::SeparatorText("Presentation");
     {
         static int displayINdex;
-        StringListDropdown("Display", s_DXGIOutputNames, displayINdex);
+        if (StringListDropdown("Display", s_DXGIOutputNames, displayINdex))
+            s_UpdateFlags |= UpdateFlags::Display;
 
         if (StringListDropdown("Adapter", s_DXGIAdapterNames, s_DXGIAdapterIndex))
             s_UpdateFlags |= UpdateFlags::GraphicsRuntime;
@@ -873,6 +875,11 @@ void SyncSettings()
         spdlog::info("Updating Window");
 
         UpdateWindow();
+    }
+
+    if ((s_UpdateFlags & UpdateFlags::Display) != 0)
+    {
+        spdlog::info("Updating Display");
     }
 
     // Clear update flags.
