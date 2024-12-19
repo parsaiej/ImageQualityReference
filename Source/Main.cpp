@@ -103,7 +103,7 @@ DirectX::XMINT2 s_ViewportSizeOutput { s_ViewportSizeInternal };
 
 // Cached window rect if going from fullscreen -> window.
 RECT s_WindowRect;
-UINT s_WindowStyle = WS_OVERLAPPEDWINDOW;
+UINT s_WindowStyle = WS_OVERLAPPEDWINDOW | WS_SYSMENU;
 
 StopWatch s_StopWatch;
 
@@ -794,7 +794,7 @@ void UpdateWindow()
                 GetWindowRect(s_Window, &s_WindowRect);
 
             // Make the window borderless so that the client area can fill the screen.
-            SetWindowLong(s_Window, GWL_STYLE, s_WindowStyle & ~(WS_CAPTION | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU | WS_THICKFRAME));
+            SetWindowLong(s_Window, GWL_STYLE, s_WindowStyle & ~(WS_CAPTION | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_THICKFRAME));
 
             RECT fullscreenWindowRect;
 
@@ -864,7 +864,7 @@ void UpdateWindow()
             spdlog::warn("Failed to go fullscreen. Check that the currently selected adapter has ownership of the display.");
 
             // Return to windowed state.
-            s_WindowMode = WindowMode::Windowed;
+            s_WindowMode = s_WindowModePrev;
         }
     };
 
@@ -875,6 +875,17 @@ void SyncSettings()
 {
     if ((s_UpdateFlags & UpdateFlags::GraphicsRuntime) != 0)
     {
+        if (s_WindowMode == WindowMode::ExclusiveFullscreen)
+        {
+            spdlog::info(
+                "Detected adapter change while in exclusive fullscreen mode.\nForcing the app into borderless fullscreen mode in case the new "
+                "adapter does not have ownership of the display.");
+
+            s_WindowMode = WindowMode::Borderless;
+
+            UpdateWindow();
+        }
+
         WaitForDevice();
 
         spdlog::info("Updating Graphics Adapter");
