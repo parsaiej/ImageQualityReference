@@ -518,7 +518,8 @@ void InitializeGraphicsRuntime()
     do
     {
         ComPtr<ID3D12DSRDeviceFactory> pDSRDeviceFactory;
-        ThrowIfFailed(D3D12GetInterface(CLSID_D3D12DSRDeviceFactory, IID_PPV_ARGS(&pDSRDeviceFactory)));
+        if (FAILED(D3D12GetInterface(CLSID_D3D12DSRDeviceFactory, IID_PPV_ARGS(&pDSRDeviceFactory))))
+            break;
 
         if (FAILED(pDSRDeviceFactory->CreateDSRDevice(s_LogicalDevice.Get(), 1, IID_PPV_ARGS(s_DSRDevice.GetAddressOf()))))
             break;
