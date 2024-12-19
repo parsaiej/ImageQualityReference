@@ -48,4 +48,14 @@ private:
     float* mValues;
 };
 
+struct XMINT2Cmp
+{
+    bool operator()(const DirectX::XMINT2& lhs, const DirectX::XMINT2& rhs) const
+    {
+        if (lhs.x != rhs.x)
+            return lhs.x < rhs.x;
+        return lhs.y < rhs.y;
+    }
+};
+
 #endif

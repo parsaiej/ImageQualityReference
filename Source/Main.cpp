@@ -25,10 +25,11 @@ enum SwapEffect
 
 enum UpdateFlags : uint32_t
 {
-    None            = 0,
-    Window          = 1 << 0,
-    SwapChain       = 1 << 1,
-    GraphicsRuntime = 1 << 2
+    None              = 0,
+    Window            = 1 << 0,
+    SwapChain         = 1 << 1,
+    DisplayModeChange = 1 << 2,
+    GraphicsRuntime   = 1 << 3
 };
 
 // State
@@ -68,13 +69,18 @@ ComPtr<IDXGIAdapter1>           s_DXGIAdapter;
 ComPtr<IDXGIFactory6>           s_DXGIFactory;
 ComPtr<IDXGISwapChain3>         s_DXGISwapChain;
 std::vector<DXGI_ADAPTER_DESC1> s_DXGIAdapterInfos;
-int                             s_DXGIAdapterIndex;
 SwapEffect                      s_DXGISwapEffect;
 std::vector<IDXGIOutput*>       s_DXGIOutputs;
 std::vector<std::string>        s_DXGIOutputNames;
 std::vector<DXGI_MODE_DESC>     s_DXGIDisplayModes;
 std::vector<std::string>        s_DXGIDisplayModesStr;
-int                             s_DXGIOutputsIndex;
+
+std::set<DirectX::XMINT2, XMINT2Cmp> s_DXGIDisplayResolutions;
+std::vector<std::string>             s_DXGIDisplayResolutionsStr;
+
+int s_DXGIAdapterIndex;
+int s_DXGIOutputsIndex;
+int s_DXGIDisplayModesIndex;
 
 // Adapted from all found DXGI_ADAPTER_DESC1 for easy display in the UI.
 std::vector<std::string> s_DXGIAdapterNames;
@@ -103,6 +109,7 @@ DirectX::XMINT2 s_ViewportSizeInternal { 1920, 1080 };
 
 // Output (post-upscaled) viewport resolution.
 DirectX::XMINT2 s_ViewportSizeOutput { s_ViewportSizeInternal };
+DirectX::XMINT2 s_ViewportSizeOutputPrev { -1, -1 };
 
 // Cached window rect if going from fullscreen -> window.
 RECT s_WindowRect;
@@ -399,10 +406,11 @@ void ReleaseSwapChain()
 
 void ResizeSwapChain()
 {
+    if (s_ViewportSizeOutput.x == s_ViewportSizeOutputPrev.x || s_ViewportSizeOutput.y == s_ViewportSizeOutputPrev.y)
+        return;
+
     for (auto& swapChainImageView : s_SwapChainImages)
         swapChainImageView.Reset();
-
-    s_SwapChainImages.resize(s_SwapChainImageCount);
 
     DXGI_SWAP_CHAIN_DESC swapChainInfo = {};
     s_DXGISwapChain->GetDesc(&swapChainInfo);
@@ -417,6 +425,8 @@ void ResizeSwapChain()
 
     CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(s_RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 
+    s_SwapChainImages.resize(s_SwapChainImageCount);
+
     for (UINT swapChainImageIndex = 0; swapChainImageIndex < s_SwapChainImageCount; swapChainImageIndex++)
     {
         ThrowIfFailed(s_DXGISwapChain->GetBuffer(swapChainImageIndex, IID_PPV_ARGS(s_SwapChainImages[swapChainImageIndex].GetAddressOf())));
@@ -424,6 +434,8 @@ void ResizeSwapChain()
 
         rtvHandle.Offset(1, s_RTVDescriptorSize);
     }
+
+    s_ViewportSizeOutputPrev = s_ViewportSizeOutput;
 }
 
 void ReleaseGraphicsRuntime()
@@ -493,11 +505,11 @@ void EnumerateOutputDisplays()
 void EnumerateDisplayModes()
 {
     UINT displayModeCount;
-    ThrowIfFailed(s_DXGIOutputs[0]->GetDisplayModeList(DXGI_FORMAT_R8G8B8A8_UNORM, 0, &displayModeCount, nullptr));
+    ThrowIfFailed(s_DXGIOutputs[s_DXGIOutputsIndex]->GetDisplayModeList(DXGI_FORMAT_R8G8B8A8_UNORM, 0, &displayModeCount, nullptr));
 
     s_DXGIDisplayModes.resize(displayModeCount);
 
-    ThrowIfFailed(s_DXGIOutputs[0]->GetDisplayModeList(DXGI_FORMAT_R8G8B8A8_UNORM, 0, &displayModeCount, s_DXGIDisplayModes.data()));
+    ThrowIfFailed(s_DXGIOutputs[s_DXGIOutputsIndex]->GetDisplayModeList(DXGI_FORMAT_R8G8B8A8_UNORM, 0, &displayModeCount, s_DXGIDisplayModes.data()));
 
     // Extract list of names for overlay.
     std::transform(s_DXGIDisplayModes.begin(),
@@ -511,6 +523,17 @@ void EnumerateDisplayModes()
                                           mode.RefreshRate.Numerator / mode.RefreshRate.Denominator,
                                           magic_enum::enum_name(mode.Scaling));
                    });
+
+    // Extract resolution list
+    std::transform(s_DXGIDisplayModes.begin(),
+                   s_DXGIDisplayModes.end(),
+                   std::inserter(s_DXGIDisplayResolutions, s_DXGIDisplayResolutions.begin()),
+                   [&](const DXGI_MODE_DESC& mode) { return DirectX::XMINT2(mode.Width, mode.Height); });
+
+    std::transform(s_DXGIDisplayResolutions.begin(),
+                   s_DXGIDisplayResolutions.end(),
+                   std::back_inserter(s_DXGIDisplayResolutionsStr),
+                   [&](const DirectX::XMINT2& r) { return std::format("{} x {}", r.x, r.y); });
 }
 
 void InitializeGraphicsRuntime()
@@ -684,32 +707,6 @@ void InitializeGraphicsRuntime()
     {
         spdlog::info("Device: {}", s_DXGIAdapterNames[s_DXGIAdapterIndex]);
         spdlog::info("VRAM:   {} GB", s_DXGIAdapterInfos[s_DXGIAdapterIndex].DedicatedVideoMemory / static_cast<float>(1024 * 1024 * 1024));
-
-#if 0
-        std::stringstream runtimeInfoMsg;
-
-        runtimeInfoMsg << std::endl << std::endl;
-        runtimeInfoMsg << std::left << std::setw(13) << "Device: " << s_DXGIAdapterNames[s_DXGIAdapterIndex] << std::endl;
-        runtimeInfoMsg << std::left << std::setw(13)
-                       << "VRAM: " << s_DXGIAdapterInfos[s_DXGIAdapterIndex].DedicatedVideoMemory / static_cast<float>(1024 * 1024 * 1024)
-                       << " GB (Dedicated)" << std::endl;
-        runtimeInfoMsg << std::left << std::setw(13) << "DirectSR: ";
-
-        if (s_DSRVariantDescs.empty())
-            runtimeInfoMsg << "None" << std::endl;
-        else
-        {
-            for (const auto& variantDesc : s_DSRVariantDescs)
-            {
-                runtimeInfoMsg << variantDesc.VariantName << std::endl;
-                runtimeInfoMsg << std::left << std::setw(13) << " ";
-            }
-        }
-
-        runtimeInfoMsg << std::endl;
-
-        spdlog::info(runtimeInfoMsg.str());
-#endif
     }
 }
 
@@ -728,14 +725,13 @@ void RenderInterface()
     {
         StringListDropdown("Display", s_DXGIOutputNames, s_DXGIOutputsIndex);
 
+        StringListDropdown("Resolution", s_DXGIDisplayResolutionsStr, s_DXGIDisplayModesIndex);
+
         if (StringListDropdown("Adapter", s_DXGIAdapterNames, s_DXGIAdapterIndex))
             s_UpdateFlags |= UpdateFlags::GraphicsRuntime;
 
         if (EnumDropdown<WindowMode>("Window Mode", reinterpret_cast<int*>(&s_WindowMode)))
             s_UpdateFlags |= UpdateFlags::Window;
-
-        static int test;
-        StringListDropdown("Display Modes", s_DXGIDisplayModesStr, test);
 
         if (EnumDropdown<SwapEffect>("Swap Effect", reinterpret_cast<int*>(&s_DXGISwapEffect)))
             s_UpdateFlags |= UpdateFlags::SwapChain;
@@ -932,7 +928,7 @@ void UpdateWindow()
             if (s_WindowModePrev == WindowMode::Windowed)
                 GetWindowRect(s_Window, &s_WindowRect);
 
-            if (SUCCEEDED(s_DXGISwapChain->SetFullscreenState(true, nullptr)))
+            if (SUCCEEDED(s_DXGISwapChain->SetFullscreenState(true, s_DXGIOutputs[s_DXGIDisplayModesIndex])))
             {
                 // If swapping from borderless mode, we need to manually resize the swapchain here instead of
                 // the WM_SIZE windows message proc since the borderless fullscreen + exclusive fullscreen are the same size.
@@ -987,6 +983,13 @@ void SyncSettings()
         CreateSwapChain();
     }
 
+    if ((s_UpdateFlags & UpdateFlags::DisplayModeChange) != 0)
+    {
+        WaitForDevice();
+
+        ThrowIfFailed(s_DXGISwapChain->ResizeTarget(&s_DXGIDisplayModes[s_DXGIDisplayModesIndex]));
+    }
+
     if ((s_UpdateFlags & UpdateFlags::Window) != 0)
     {
         spdlog::info("Updating Window");
@@ -1008,12 +1011,10 @@ void Render()
 
     ThrowIfFailed(s_CommandList->Reset(s_CommandAllocator.Get(), nullptr));
 
-    // Start the Dear ImGui frame
     ImGui_ImplDX12_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
-    // Indicate that the back buffer will be used as a render target.
     auto presentToRenderBarrier = CD3DX12_RESOURCE_BARRIER::Transition(s_SwapChainImages[s_CurrentSwapChainImageIndex].Get(),
                                                                        D3D12_RESOURCE_STATE_PRESENT,
                                                                        D3D12_RESOURCE_STATE_RENDER_TARGET);
@@ -1044,7 +1045,6 @@ void Render()
     s_CommandList->SetDescriptorHeaps(1, s_SRVDescriptorHeap.GetAddressOf());
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), s_CommandList.Get());
 
-    // Indicate that the back buffer will now be used to present.
     auto renderToPresentBarrier = CD3DX12_RESOURCE_BARRIER::Transition(s_SwapChainImages[s_CurrentSwapChainImageIndex].Get(),
                                                                        D3D12_RESOURCE_STATE_RENDER_TARGET,
                                                                        D3D12_RESOURCE_STATE_PRESENT);
@@ -1052,7 +1052,6 @@ void Render()
 
     ThrowIfFailed(s_CommandList->Close());
 
-    // Execute the command list.
     ID3D12CommandList* ppCommandLists[] = { s_CommandList.Get() };
     s_CommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 

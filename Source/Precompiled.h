@@ -26,6 +26,7 @@
 
 #include <Windows.h>
 #include <format>
+#include <set>
 
 #include "SplashImageBytes.h"
 #include "Util.h"
