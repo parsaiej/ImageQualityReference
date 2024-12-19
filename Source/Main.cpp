@@ -37,7 +37,8 @@ enum UpdateFlags : uint32_t
 HINSTANCE s_Instance = nullptr;
 HWND      s_Window   = nullptr;
 
-WindowMode s_WindowMode = WindowMode::Windowed;
+WindowMode s_WindowMode     = WindowMode::Windowed;
+WindowMode s_WindowModePrev = WindowMode::Windowed;
 
 int s_CurrentSwapChainImageIndex;
 int s_RTVDescriptorSize;
@@ -114,6 +115,8 @@ std::string FromWideStr(std::wstring str);
 void CreateSwapChain();
 
 void ReleaseSwapChain();
+
+void ResizeSwapChain();
 
 // Creates an OS window for Microsoft Windows.
 void CreateOperatingSystemWindow();
@@ -370,6 +373,35 @@ void ReleaseSwapChain()
     }
 
     s_DXGISwapChain.Reset();
+}
+
+void ResizeSwapChain()
+{
+    for (auto& swapChainImageView : s_SwapChainImages)
+        swapChainImageView->Release();
+
+    s_SwapChainImages.resize(s_SwapChainImageCount);
+
+    DXGI_SWAP_CHAIN_DESC swapChainInfo = {};
+    s_DXGISwapChain->GetDesc(&swapChainInfo);
+
+    ThrowIfFailed(s_DXGISwapChain->ResizeBuffers(s_SwapChainImageCount,
+                                                 s_ViewportSizeOutput.x,
+                                                 s_ViewportSizeOutput.y,
+                                                 swapChainInfo.BufferDesc.Format,
+                                                 swapChainInfo.Flags));
+
+    s_CurrentSwapChainImageIndex = s_DXGISwapChain->GetCurrentBackBufferIndex();
+
+    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(s_RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+
+    for (UINT swapChainImageIndex = 0; swapChainImageIndex < s_SwapChainImageCount; swapChainImageIndex++)
+    {
+        ThrowIfFailed(s_DXGISwapChain->GetBuffer(swapChainImageIndex, IID_PPV_ARGS(&s_SwapChainImages[swapChainImageIndex])));
+        s_LogicalDevice->CreateRenderTargetView(s_SwapChainImages[swapChainImageIndex], nullptr, rtvHandle);
+
+        rtvHandle.Offset(1, s_RTVDescriptorSize);
+    }
 }
 
 void ReleaseGraphicsRuntime(bool releaseComPtr)
@@ -679,16 +711,8 @@ void RenderInterface()
         static float elapsedTime = 0;
         elapsedTime += s_DeltaTime;
 
-        float        deltaTimeMs     = 1000.0f * s_DeltaTime;
-        static float deltaTimeMsMax  = 1000.0f / 240.0f;
-        static float deltaTimeMsPrev = 0.0;
-
-        // Do not tolerate 10ms+ jumps.
-        if (abs(deltaTimeMs - deltaTimeMsPrev) < 10.0f)
-            deltaTimeMsMax = std::max(deltaTimeMsMax, deltaTimeMs);
-
+        float deltaTimeMs = 1000.0f * s_DeltaTime;
         s_DeltaTimeMovingAverage.AddValue(deltaTimeMs);
-
         s_DeltaTimeBuffer.AddPoint(elapsedTime, deltaTimeMs);
         s_DeltaTimeMovingAverageBuffer.AddPoint(elapsedTime, s_DeltaTimeMovingAverage.GetAverage());
 
@@ -719,8 +743,6 @@ void RenderInterface()
 
             ImPlot::EndPlot();
         }
-
-        deltaTimeMsPrev = deltaTimeMs;
     }
 
     ImGui::SeparatorText("Log");
@@ -745,6 +767,8 @@ void UpdateWindow()
     {
         case WindowMode::Windowed:
         {
+            ThrowIfFailed(s_DXGISwapChain->SetFullscreenState(false, nullptr));
+
             // Restore the window's attributes and size.
             SetWindowLong(s_Window, GWL_STYLE, s_WindowStyle);
 
@@ -763,8 +787,11 @@ void UpdateWindow()
 
         case WindowMode::Borderless:
         {
+            ThrowIfFailed(s_DXGISwapChain->SetFullscreenState(false, nullptr));
+
             // Save the old window rect so we can restore it when exiting fullscreen mode.
-            GetWindowRect(s_Window, &s_WindowRect);
+            if (s_WindowModePrev == WindowMode::Windowed)
+                GetWindowRect(s_Window, &s_WindowRect);
 
             // Make the window borderless so that the client area can fill the screen.
             SetWindowLong(s_Window, GWL_STYLE, s_WindowStyle & ~(WS_CAPTION | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU | WS_THICKFRAME));
@@ -820,10 +847,19 @@ void UpdateWindow()
 
         case WindowMode::ExclusiveFullscreen:
         {
-            WaitForDevice();
+            // Save the old window rect so we can restore it when exiting fullscreen mode.
+            if (s_WindowModePrev == WindowMode::Windowed)
+                GetWindowRect(s_Window, &s_WindowRect);
 
             if (SUCCEEDED(s_DXGISwapChain->SetFullscreenState(true, nullptr)))
+            {
+                // If swapping from borderless mode, we need to manually resize the swapchain here instead of
+                // the WM_SIZE windows message proc since the borderless fullscreen + exclusive fullscreen are the same size.
+                if (s_WindowModePrev == WindowMode::Borderless)
+                    ResizeSwapChain();
+
                 break;
+            }
 
             spdlog::warn("Failed to go fullscreen. Check that the currently selected adapter has ownership of the display.");
 
@@ -831,6 +867,8 @@ void UpdateWindow()
             s_WindowMode = WindowMode::Windowed;
         }
     };
+
+    s_WindowModePrev = s_WindowMode;
 }
 
 void SyncSettings()
@@ -948,40 +986,13 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
         case WM_SIZE:
         {
             RECT clientRect = {};
+
             GetClientRect(hWnd, &clientRect);
 
             s_ViewportSizeOutput.x = clientRect.right - clientRect.left;
             s_ViewportSizeOutput.y = clientRect.bottom - clientRect.top;
 
-            WaitForDevice();
-
-            // Release swap chain image views.
-            for (auto& swapChainImageView : s_SwapChainImages)
-                swapChainImageView->Release();
-
-            s_SwapChainImages.resize(s_SwapChainImageCount);
-
-            DXGI_SWAP_CHAIN_DESC swapChainInfo = {};
-            s_DXGISwapChain->GetDesc(&swapChainInfo);
-
-            ThrowIfFailed(s_DXGISwapChain->ResizeBuffers(s_SwapChainImageCount,
-                                                         s_ViewportSizeOutput.x,
-                                                         s_ViewportSizeOutput.y,
-                                                         swapChainInfo.BufferDesc.Format,
-                                                         swapChainInfo.Flags));
-
-            s_CurrentSwapChainImageIndex = s_DXGISwapChain->GetCurrentBackBufferIndex();
-
-            CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(s_RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-
-            // Create a RTV for each frame.
-            for (UINT n = 0; n < s_SwapChainImageCount; n++)
-            {
-                ThrowIfFailed(s_DXGISwapChain->GetBuffer(n, IID_PPV_ARGS(&s_SwapChainImages[n])));
-                s_LogicalDevice->CreateRenderTargetView(s_SwapChainImages[n], nullptr, rtvHandle);
-
-                rtvHandle.Offset(1, s_RTVDescriptorSize);
-            }
+            ResizeSwapChain();
 
             return 0;
         }
