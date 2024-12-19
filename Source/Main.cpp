@@ -78,19 +78,21 @@ std::vector<std::string> s_DXGIAdapterNames;
 // Log buffer memory.
 std::shared_ptr<std::stringstream> s_LoggerMemory;
 
-// Ring buffer for frame time (ms)
-static ScrollingBuffer s_FrameTimeBuffer;
+// Time since last present.
+float s_DeltaTime = 0.0;
+
+// Maintain a 120-frame moving average for the delta time.
+MovingAverage s_DeltaTimeMovingAverage(240);
+
+// Ring buffer for frame time (ms) + moving average
+ScrollingBuffer s_DeltaTimeBuffer;
+ScrollingBuffer s_DeltaTimeMovingAverageBuffer;
 
 // V-Sync Interval requested by user.
 int s_SyncInterval;
 
 // Current update flags for the frame.
 uint32_t s_UpdateFlags;
-
-// Various flags to keep the state of the process in sync with user selection.
-bool s_RecreateDevice    = false;
-bool s_RecreateSwapChain = false;
-bool s_UpdateWindow      = false;
 
 // Internal (pre-upscaled) viewport resolution.
 DirectX::XMINT2 s_ViewportSizeInternal { 1920, 1080 };
@@ -101,6 +103,8 @@ DirectX::XMINT2 s_ViewportSizeOutput { s_ViewportSizeInternal };
 // Cached window rect if going from fullscreen -> window.
 RECT s_WindowRect;
 UINT s_WindowStyle = WS_OVERLAPPEDWINDOW;
+
+StopWatch s_StopWatch;
 
 // Utility Prototypes
 // -----------------------------
@@ -325,7 +329,6 @@ void CreateSwapChain()
     swapChainDesc.Format                = DXGI_FORMAT_R8G8B8A8_UNORM;
     swapChainDesc.BufferUsage           = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     swapChainDesc.SampleDesc.Count      = 1;
-    // swapChainDesc.Flags                 = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING | DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
 
     switch (s_DXGISwapEffect)
     {
@@ -444,6 +447,9 @@ void InitializeGraphicsRuntime()
     dxgiFactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
 #endif
 
+    // DXGI Adapter Selection
+    // ------------------------------------------
+
     ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(s_DXGIFactory.GetAddressOf())));
 
     ComPtr<IDXGIAdapter1> pAdapter;
@@ -479,6 +485,8 @@ void InitializeGraphicsRuntime()
     ThrowIfFailed(s_LogicalDevice->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(s_CommandQueue.GetAddressOf())));
 
     // Descriptor heaps.
+    // ------------------------------------------
+
     {
         D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
         rtvHeapDesc.NumDescriptors             = 32;
@@ -496,16 +504,24 @@ void InitializeGraphicsRuntime()
         s_SRVDescriptorSize = s_LogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     }
 
+    // ------------------------------------------
+
     CreateSwapChain();
+
+    // ------------------------------------------
 
     ThrowIfFailed(s_LogicalDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(s_CommandAllocator.GetAddressOf())));
 
     // Initialize DirectSR device.
-#if 0
+    // ------------------------------------------
+
+    do
     {
         ComPtr<ID3D12DSRDeviceFactory> pDSRDeviceFactory;
         ThrowIfFailed(D3D12GetInterface(CLSID_D3D12DSRDeviceFactory, IID_PPV_ARGS(&pDSRDeviceFactory)));
-        ThrowIfFailed(pDSRDeviceFactory->CreateDSRDevice(s_LogicalDevice.Get(), 1, IID_PPV_ARGS(s_DSRDevice.GetAddressOf())));
+
+        if (FAILED(pDSRDeviceFactory->CreateDSRDevice(s_LogicalDevice.Get(), 1, IID_PPV_ARGS(s_DSRDevice.GetAddressOf()))))
+            break;
 
         s_DSRVariantDescs.resize(s_DSRDevice->GetNumSuperResVariants());
 
@@ -526,7 +542,7 @@ void InitializeGraphicsRuntime()
                        std::back_inserter(s_DSRVariantNames),
                        [](const DSR_SUPERRES_VARIANT_DESC& variantDesc) { return variantDesc.VariantName; });
     }
-#endif
+    while (false);
 
     ThrowIfFailed(s_LogicalDevice->CreateCommandList(0,
                                                      D3D12_COMMAND_LIST_TYPE_DIRECT,
@@ -536,7 +552,9 @@ void InitializeGraphicsRuntime()
 
     ThrowIfFailed(s_CommandList->Close());
 
-    // Create synchronization objects and wait until assets have been uploaded to the GPU.
+    // Frames-in-flight synchronization objects.
+    // ------------------------------------------
+
     {
         ThrowIfFailed(s_LogicalDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(s_Fence.GetAddressOf())));
         s_FenceValue = 1;
@@ -555,6 +573,8 @@ void InitializeGraphicsRuntime()
     }
 
     // Initialize ImGui.
+    // ------------------------------------------
+
     {
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
@@ -582,6 +602,8 @@ void InitializeGraphicsRuntime()
     }
 
     // Log a message containing information about the adapter.
+    // ------------------------------------------
+
     {
         std::stringstream runtimeInfoMsg;
 
@@ -634,10 +656,8 @@ void RenderInterface()
         if (EnumDropdown<SwapEffect>("Swap Effect", reinterpret_cast<int*>(&s_DXGISwapEffect)))
             s_UpdateFlags |= UpdateFlags::SwapChain;
 
-#if 0
         if (!s_DSRVariantDescs.empty())
             StringListDropdown("DirectSR Algorithm", s_DSRVariantNames, s_DSRVariantIndex);
-#endif
 
         if (ImGui::SliderInt("Buffering", reinterpret_cast<int*>(&s_SwapChainImageCount), 2, DXGI_MAX_SWAP_CHAIN_BUFFERS - 1))
             s_UpdateFlags |= UpdateFlags::SwapChain;
@@ -656,36 +676,50 @@ void RenderInterface()
     ImGui::SeparatorText("Performance");
     {
         static float elapsedTime = 0;
-        elapsedTime += ImGui::GetIO().DeltaTime;
+        elapsedTime += s_DeltaTime;
 
-        const float deltaTimeMilliseconds = 1000.0f * ImGui::GetIO().DeltaTime;
+        float        deltaTimeMs     = 1000.0f * s_DeltaTime;
+        static float deltaTimeMsMax  = 1000.0f / 240.0f;
+        static float deltaTimeMsPrev = 0.0;
 
-        s_FrameTimeBuffer.AddPoint(elapsedTime, deltaTimeMilliseconds);
+        // Do not tolerate 10ms+ jumps.
+        if (abs(deltaTimeMs - deltaTimeMsPrev) < 10.0f)
+            deltaTimeMsMax = std::max(deltaTimeMsMax, deltaTimeMs);
+
+        s_DeltaTimeMovingAverage.AddValue(deltaTimeMs);
+
+        s_DeltaTimeBuffer.AddPoint(elapsedTime, deltaTimeMs);
+        s_DeltaTimeMovingAverageBuffer.AddPoint(elapsedTime, s_DeltaTimeMovingAverage.GetAverage());
 
         static float history = 10.0f;
 
-        static ImPlotAxisFlags flags = ImPlotAxisFlags_NoTickLabels;
-
         if (ImPlot::BeginPlot("##Scrolling", ImVec2(-1, 150)))
         {
-            ImPlot::SetupAxes(nullptr, nullptr, flags, flags);
+            ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, 0x0);
             ImPlot::SetupAxisLimits(ImAxis_X1, elapsedTime - history, elapsedTime, ImGuiCond_Always);
-            ImPlot::SetupAxisLimits(ImAxis_Y1, 0, 1000.0f / 60.0f);
+            ImPlot::SetupAxisLimits(ImAxis_Y1, 0, deltaTimeMsMax, ImGuiCond_Always);
             ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.5f);
 
             ImPlot::PlotLine("Frame Time (ms)",
-                             &s_FrameTimeBuffer.data[0].x,
-                             &s_FrameTimeBuffer.data[0].y,
-                             s_FrameTimeBuffer.data.size(),
+                             &s_DeltaTimeBuffer.mData[0].x,
+                             &s_DeltaTimeBuffer.mData[0].y,
+                             s_DeltaTimeBuffer.mData.size(),
                              ImPlotLineFlags_None,
-                             s_FrameTimeBuffer.offset,
+                             s_DeltaTimeBuffer.mOffset,
                              2 * sizeof(float));
 
-            const auto mousePositionPlotRelative = ImPlot::GetPlotMousePos();
-            ImPlot::PlotText(std::format("{:.2f}", deltaTimeMilliseconds).c_str(), mousePositionPlotRelative.x, mousePositionPlotRelative.y + 1);
+            ImPlot::PlotLine("Frame Time (ms) (smooth)",
+                             &s_DeltaTimeMovingAverageBuffer.mData[0].x,
+                             &s_DeltaTimeMovingAverageBuffer.mData[0].y,
+                             s_DeltaTimeMovingAverageBuffer.mData.size(),
+                             ImPlotLineFlags_None,
+                             s_DeltaTimeMovingAverageBuffer.mOffset,
+                             2 * sizeof(float));
 
             ImPlot::EndPlot();
         }
+
+        deltaTimeMsPrev = deltaTimeMs;
     }
 
     ImGui::SeparatorText("Log");
@@ -836,6 +870,8 @@ void SyncSettings()
 void Render()
 {
     SyncSettings();
+
+    s_StopWatch.Read(s_DeltaTime);
 
     ThrowIfFailed(s_CommandAllocator->Reset());
 

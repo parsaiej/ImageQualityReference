@@ -27,8 +27,8 @@
 #include <Windows.h>
 #include <format>
 
-#include "ScrollingBuffer.h"
 #include "SplashImageBytes.h"
+#include "Util.h"
 
 using namespace Microsoft::WRL;
 
