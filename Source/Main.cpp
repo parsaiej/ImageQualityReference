@@ -279,7 +279,7 @@ void EnumerateSupportedAdapters()
         return;
 
     MessageBox(nullptr,
-               "No D3D12 Adapters found that support D3D_FEATURE_LEVEL_12_2. The app will now exit.",
+               "No D3D12 Adapters found that support D3D_FEATURE_LEVEL_12_0. The app will now exit.",
                "Image Quality Reference",
                MB_ICONERROR | MB_OK);
 
@@ -325,7 +325,7 @@ void CreateSwapChain()
     swapChainDesc.Format                = DXGI_FORMAT_R8G8B8A8_UNORM;
     swapChainDesc.BufferUsage           = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     swapChainDesc.SampleDesc.Count      = 1;
-    swapChainDesc.Flags                 = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING | DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+    // swapChainDesc.Flags                 = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING | DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
 
     switch (s_DXGISwapEffect)
     {
@@ -501,6 +501,7 @@ void InitializeGraphicsRuntime()
     ThrowIfFailed(s_LogicalDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(s_CommandAllocator.GetAddressOf())));
 
     // Initialize DirectSR device.
+#if 0
     {
         ComPtr<ID3D12DSRDeviceFactory> pDSRDeviceFactory;
         ThrowIfFailed(D3D12GetInterface(CLSID_D3D12DSRDeviceFactory, IID_PPV_ARGS(&pDSRDeviceFactory)));
@@ -525,6 +526,7 @@ void InitializeGraphicsRuntime()
                        std::back_inserter(s_DSRVariantNames),
                        [](const DSR_SUPERRES_VARIANT_DESC& variantDesc) { return variantDesc.VariantName; });
     }
+#endif
 
     ThrowIfFailed(s_LogicalDevice->CreateCommandList(0,
                                                      D3D12_COMMAND_LIST_TYPE_DIRECT,
@@ -632,8 +634,10 @@ void RenderInterface()
         if (EnumDropdown<SwapEffect>("Swap Effect", reinterpret_cast<int*>(&s_DXGISwapEffect)))
             s_UpdateFlags |= UpdateFlags::SwapChain;
 
+#if 0
         if (!s_DSRVariantDescs.empty())
             StringListDropdown("DirectSR Algorithm", s_DSRVariantNames, s_DSRVariantIndex);
+#endif
 
         if (ImGui::SliderInt("Buffering", reinterpret_cast<int*>(&s_SwapChainImageCount), 2, DXGI_MAX_SWAP_CHAIN_BUFFERS - 1))
             s_UpdateFlags |= UpdateFlags::SwapChain;
