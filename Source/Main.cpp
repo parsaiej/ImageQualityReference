@@ -86,7 +86,7 @@ std::shared_ptr<std::stringstream> s_LoggerMemory;
 float s_DeltaTime = 0.0;
 
 // Maintain a 120-frame moving average for the delta time.
-MovingAverage s_DeltaTimeMovingAverage(240);
+MovingAverage s_DeltaTimeMovingAverage(60);
 
 // Ring buffer for frame time (ms) + moving average
 ScrollingBuffer s_DeltaTimeBuffer;
@@ -172,7 +172,7 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
     auto logger     = std::make_shared<spdlog::logger>("", loggerSink);
 
     spdlog::set_default_logger(logger);
-    spdlog::set_pattern("%v");
+    spdlog::set_pattern("[%l] %v");
 
 #ifdef _DEBUG
     spdlog::set_level(spdlog::level::debug);
@@ -239,8 +239,11 @@ bool EnumDropdown(const char* name, int* selectedEnumIndex)
     return ImGui::Combo(name, selectedEnumIndex, enumNameStrings.data(), static_cast<int>(enumNameStrings.size()));
 }
 
-bool StringListDropdown(const char* name, std::vector<std::string>& strings, int& selectedIndex)
+bool StringListDropdown(const char* name, const std::vector<std::string>& strings, int& selectedIndex)
 {
+    if (strings.empty())
+        return false;
+
     bool modified = false;
 
     if (ImGui::BeginCombo(name, strings[selectedIndex].c_str()))
@@ -260,6 +263,16 @@ bool StringListDropdown(const char* name, std::vector<std::string>& strings, int
     }
 
     return modified;
+}
+
+bool StringListDropdown(const char* name, const char* const* cstrings, size_t size, int& selectedIndex)
+{
+    std::vector<std::string> strings;
+
+    for (uint32_t i = 0; i < size; i++)
+        strings.push_back(cstrings[i]);
+
+    return StringListDropdown(name, strings, selectedIndex);
 }
 
 void EnumerateSupportedAdapters()
@@ -669,6 +682,10 @@ void InitializeGraphicsRuntime()
     // ------------------------------------------
 
     {
+        spdlog::info("Device: {}", s_DXGIAdapterNames[s_DXGIAdapterIndex]);
+        spdlog::info("VRAM:   {} GB", s_DXGIAdapterInfos[s_DXGIAdapterIndex].DedicatedVideoMemory / static_cast<float>(1024 * 1024 * 1024));
+
+#if 0
         std::stringstream runtimeInfoMsg;
 
         runtimeInfoMsg << std::endl << std::endl;
@@ -692,6 +709,7 @@ void InitializeGraphicsRuntime()
         runtimeInfoMsg << std::endl;
 
         spdlog::info(runtimeInfoMsg.str());
+#endif
     }
 }
 
@@ -722,9 +740,6 @@ void RenderInterface()
         if (EnumDropdown<SwapEffect>("Swap Effect", reinterpret_cast<int*>(&s_DXGISwapEffect)))
             s_UpdateFlags |= UpdateFlags::SwapChain;
 
-        if (!s_DSRVariantDescs.empty())
-            StringListDropdown("DirectSR Algorithm", s_DSRVariantNames, s_DSRVariantIndex);
-
         if (ImGui::SliderInt("Buffering", reinterpret_cast<int*>(&s_SwapChainImageCount), 2, DXGI_MAX_SWAP_CHAIN_BUFFERS - 1))
             s_UpdateFlags |= UpdateFlags::SwapChain;
 
@@ -734,26 +749,56 @@ void RenderInterface()
         ImGui::SliderInt("Frames in Flight", &s_FramesInFlightCount, 1, 16);
     }
 
+    if (ImGui::CollapsingHeader("Rendering", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        if (!s_DSRVariantDescs.empty())
+            StringListDropdown("DirectSR Algorithm", s_DSRVariantNames, s_DSRVariantIndex);
+        else
+            StringListDropdown("DirectSR Algorithm", { "None" }, s_DSRVariantIndex);
+    }
+
     if (ImGui::CollapsingHeader("Performance", ImGuiTreeNodeFlags_DefaultOpen))
     {
         static float elapsedTime = 0;
         elapsedTime += s_DeltaTime;
 
-        float deltaTimeMs = 1000.0f * s_DeltaTime;
-        s_DeltaTimeMovingAverage.AddValue(deltaTimeMs);
-        s_DeltaTimeBuffer.AddPoint(elapsedTime, deltaTimeMs);
-        s_DeltaTimeMovingAverageBuffer.AddPoint(elapsedTime, s_DeltaTimeMovingAverage.GetAverage());
+        constexpr std::array<const char*, 2> graphModes = { "Frame Time (Milliseconds)", "Frames-per-Second" };
+
+        static int selectedPerformanceGraphMode;
+        StringListDropdown("Graph Mode", graphModes.data(), graphModes.size(), selectedPerformanceGraphMode);
+
+        switch (selectedPerformanceGraphMode)
+        {
+            case 0:
+            {
+                float deltaTimeMs = 1000.0f * s_DeltaTime;
+                s_DeltaTimeMovingAverage.AddValue(deltaTimeMs);
+                s_DeltaTimeBuffer.AddPoint(elapsedTime, deltaTimeMs);
+                s_DeltaTimeMovingAverageBuffer.AddPoint(elapsedTime, s_DeltaTimeMovingAverage.GetAverage());
+                break;
+            }
+
+            case 1:
+            {
+                float framesPerSecond = 1.0f / s_DeltaTime;
+                s_DeltaTimeMovingAverage.AddValue(framesPerSecond);
+                s_DeltaTimeBuffer.AddPoint(elapsedTime, framesPerSecond);
+                s_DeltaTimeMovingAverageBuffer.AddPoint(elapsedTime, s_DeltaTimeMovingAverage.GetAverage());
+                break;
+            }
+        }
 
         static float history = 3.0f;
 
-        if (ImPlot::BeginPlot("##Scrolling", ImVec2(-1, 150)))
+        if (ImPlot::BeginPlot("##PerformanceChild", ImVec2(-1, 150)))
         {
             ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, 0x0);
             ImPlot::SetupAxisLimits(ImAxis_X1, elapsedTime - history, elapsedTime, ImGuiCond_Always);
             ImPlot::SetupAxisLimits(ImAxis_Y1, 0, s_DeltaTimeMovingAverage.GetAverage() * 2.0, ImGuiCond_Always);
-            ImPlot::SetNextFillStyle(IMPLOT_AUTO_COL, 0.5f);
 
-            ImPlot::PlotLine("Frame Time (ms)",
+            ImPlot::SetNextLineStyle(IMPLOT_AUTO_COL, 1.0);
+
+            ImPlot::PlotLine("Exact",
                              &s_DeltaTimeBuffer.mData[0].x,
                              &s_DeltaTimeBuffer.mData[0].y,
                              s_DeltaTimeBuffer.mData.size(),
@@ -761,7 +806,9 @@ void RenderInterface()
                              s_DeltaTimeBuffer.mOffset,
                              2 * sizeof(float));
 
-            ImPlot::PlotLine("Frame Time (ms) (smooth)",
+            ImPlot::SetNextLineStyle(IMPLOT_AUTO_COL, 2.0);
+
+            ImPlot::PlotLine("Smoothed",
                              &s_DeltaTimeMovingAverageBuffer.mData[0].x,
                              &s_DeltaTimeMovingAverageBuffer.mData[0].y,
                              s_DeltaTimeMovingAverageBuffer.mData.size(),
@@ -775,7 +822,10 @@ void RenderInterface()
 
     if (ImGui::CollapsingHeader("Log", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        if (ImGui::BeginChild("LogSubWindow", ImVec2(0, 200), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar))
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.1f, 0.1f, 0.1f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.8f, 0.8f, 0.8f, 1.0f));
+
+        if (ImGui::BeginChild("##LogChild", ImVec2(0, 200), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar))
         {
             ImGui::TextUnformatted(s_LoggerMemory->str().c_str());
 
@@ -783,6 +833,8 @@ void RenderInterface()
                 ImGui::SetScrollHereY(1.0F);
         }
         ImGui::EndChild();
+
+        ImGui::PopStyleColor(2);
     }
 
     ImGui::PopItemWidth();
