@@ -489,8 +489,14 @@ void EnumerateDisplayModes()
     std::transform(s_DXGIDisplayModes.begin(),
                    s_DXGIDisplayModes.end(),
                    std::back_inserter(s_DXGIDisplayModesStr),
-                   [](const DXGI_MODE_DESC& mode)
-                   { return std::format("{} x {} @ {}Hz", mode.Width, mode.Height, mode.RefreshRate.Numerator / mode.RefreshRate.Denominator); });
+                   [&](const DXGI_MODE_DESC& mode)
+                   {
+                       return std::format("{} x {} @ {}Hz -- {}",
+                                          mode.Width,
+                                          mode.Height,
+                                          mode.RefreshRate.Numerator / mode.RefreshRate.Denominator,
+                                          magic_enum::enum_name(mode.Scaling));
+                   });
 }
 
 void InitializeGraphicsRuntime()
