@@ -393,8 +393,14 @@ void CreateSwapChain()
 
 void ReleaseSwapChain()
 {
-    // Need to force disable fullscreen in order to destroy swap chain.
-    ThrowIfFailed(gDXGISwapChain->SetFullscreenState(false, nullptr));
+    if (gWindowMode == WindowMode::ExclusiveFullscreen)
+    {
+        // Need to force disable fullscreen in order to destroy swap chain.
+        ThrowIfFailed(gDXGISwapChain->SetFullscreenState(false, nullptr));
+
+        // Resize back to exclusize fullscreen on the next update.
+        gUpdateFlags |= UpdateFlags::SwapChainResize;
+    }
 
     for (auto& swapChainImageView : gSwapChainImages)
     {
