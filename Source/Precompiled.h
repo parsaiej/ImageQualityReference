@@ -18,6 +18,8 @@
 #include <imgui_impl_win32.h>
 #include <imgui_impl_dx12.h>
 
+#include <GLFW/glfw3.h>
+
 #include <implot.h>
 
 #include <magic_enum/magic_enum.hpp>

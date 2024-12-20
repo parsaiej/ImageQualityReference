@@ -5,6 +5,7 @@
       "implot",
       "joltphysics",
       "magic-enum",
-      "stb"
+      "stb",
+      "glfw3"
     ]
   }

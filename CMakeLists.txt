@@ -28,6 +28,7 @@ find_package(Jolt            CONFIG REQUIRED)
 find_package(imgui           CONFIG REQUIRED)
 find_package(implot          CONFIG REQUIRED)
 find_package(magic_enum      CONFIG REQUIRED)
+find_package(glfw3           CONFIG REQUIRED)
 find_package(Stb                    REQUIRED)
 
 # Executable
@@ -64,6 +65,7 @@ target_link_libraries(ImageQualityReference PRIVATE
     Jolt::Jolt
     dxgi
     d3d12
+    glfw
     imgui::imgui
     implot::implot
     magic_enum::magic_enum
