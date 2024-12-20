@@ -840,8 +840,12 @@ void RenderInterface()
 
         ImGui::EndDisabled();
 
+        ImGui::BeginDisabled(s_WindowMode != WindowMode::ExclusiveFullscreen);
+
         if (StringListDropdown("Refresh Rate", s_DXGIDisplayRefreshRatesStr, s_DXGIDisplayRefreshRatesIndex))
             s_UpdateFlags |= UpdateFlags::SwapChainResize;
+
+        ImGui::EndDisabled();
 
         if (StringListDropdown("Adapter", s_DXGIAdapterNames, s_DXGIAdapterIndex))
             s_UpdateFlags |= UpdateFlags::GraphicsRuntime;
