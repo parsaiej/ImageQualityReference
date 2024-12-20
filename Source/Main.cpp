@@ -216,8 +216,8 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
     // Configure initial window size based on display-supplied resolutions.
     // -----------------------------------------
     {
-        // Select a resolution size from the list, around the half-largest one.
-        gDXGIDisplayResolutionsIndex = static_cast<int>(gDXGIDisplayResolutions.size()) / 2;
+        // Select a somewhat large initial resolution size from the list.
+        gDXGIDisplayResolutionsIndex = std::max(0, static_cast<int>(gDXGIDisplayResolutions.size()) - 4);
 
         gBackBufferSize = gDXGIDisplayResolutions[gDXGIDisplayResolutionsIndex];
 
@@ -937,6 +937,18 @@ void RenderInterface()
             ImPlot::SetupAxisLimits(ImAxis_Y1, 0, gDeltaTimeMovingAverage.GetAverage() * 2.0, ImGuiCond_Always);
 
             ImPlot::SetNextLineStyle(IMPLOT_AUTO_COL, 1.0);
+
+            // Custom tick label showing the average ms/fps only.
+            {
+                double middleTick = gDeltaTimeMovingAverage.GetAverage();
+
+                // Define the label for the middle tick
+                auto        averageStr      = std::format("{:.2f}", gDeltaTimeMovingAverage.GetAverage());
+                const char* middleTickLabel = averageStr.c_str();
+
+                // Set the custom ticks on the y-axis
+                ImPlot::SetupAxisTicks(ImAxis_Y1, &middleTick, 1, &middleTickLabel);
+            }
 
             ImPlot::PlotLine("Exact",
                              &gDeltaTimeBuffer.mData[0].x,
