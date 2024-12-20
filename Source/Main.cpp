@@ -27,8 +27,8 @@ enum UpdateFlags : uint32_t
 {
     None              = 0,
     Window            = 1 << 0,
-    SwapChain         = 1 << 1,
-    DisplayModeChange = 1 << 2,
+    SwapChainRecreate = 1 << 1,
+    SwapChainResize   = 1 << 2,
     GraphicsRuntime   = 1 << 3
 };
 
@@ -73,14 +73,13 @@ SwapEffect                      s_DXGISwapEffect;
 std::vector<IDXGIOutput*>       s_DXGIOutputs;
 std::vector<std::string>        s_DXGIOutputNames;
 std::vector<DXGI_MODE_DESC>     s_DXGIDisplayModes;
-std::vector<std::string>        s_DXGIDisplayModesStr;
 
-std::set<DirectX::XMINT2, XMINT2Cmp> s_DXGIDisplayResolutions;
-std::vector<std::string>             s_DXGIDisplayResolutionsStr;
+std::vector<DirectX::XMINT2> s_DXGIDisplayResolutions;
+std::vector<std::string>     s_DXGIDisplayResolutionsStr;
 
 int s_DXGIAdapterIndex;
 int s_DXGIOutputsIndex;
-int s_DXGIDisplayModesIndex;
+int s_DXGIDisplayResolutionsIndex;
 
 // Adapted from all found DXGI_ADAPTER_DESC1 for easy display in the UI.
 std::vector<std::string> s_DXGIAdapterNames;
@@ -406,7 +405,7 @@ void ReleaseSwapChain()
 
 void ResizeSwapChain()
 {
-    if (s_ViewportSizeOutput.x == s_ViewportSizeOutputPrev.x || s_ViewportSizeOutput.y == s_ViewportSizeOutputPrev.y)
+    if (s_ViewportSizeOutput.x == s_ViewportSizeOutputPrev.x && s_ViewportSizeOutput.y == s_ViewportSizeOutputPrev.y)
         return;
 
     for (auto& swapChainImageView : s_SwapChainImages)
@@ -511,29 +510,25 @@ void EnumerateDisplayModes()
 
     ThrowIfFailed(s_DXGIOutputs[s_DXGIOutputsIndex]->GetDisplayModeList(DXGI_FORMAT_R8G8B8A8_UNORM, 0, &displayModeCount, s_DXGIDisplayModes.data()));
 
-    // Extract list of names for overlay.
-    std::transform(s_DXGIDisplayModes.begin(),
-                   s_DXGIDisplayModes.end(),
-                   std::back_inserter(s_DXGIDisplayModesStr),
-                   [&](const DXGI_MODE_DESC& mode)
-                   {
-                       return std::format("{} x {} @ {}Hz -- {}",
-                                          mode.Width,
-                                          mode.Height,
-                                          mode.RefreshRate.Numerator / mode.RefreshRate.Denominator,
-                                          magic_enum::enum_name(mode.Scaling));
-                   });
+    // Extract list of unique resolutions. (There may be multiples of the same resolution due
+    // to various refresh rates, dxgi formats, etc.).
+    // ----------------------------------------------------------
+    {
+        std::set<DirectX::XMINT2, XMINT2Cmp> uniqueDisplayModeResolutions;
 
-    // Extract resolution list
-    std::transform(s_DXGIDisplayModes.begin(),
-                   s_DXGIDisplayModes.end(),
-                   std::inserter(s_DXGIDisplayResolutions, s_DXGIDisplayResolutions.begin()),
-                   [&](const DXGI_MODE_DESC& mode) { return DirectX::XMINT2(mode.Width, mode.Height); });
+        std::transform(s_DXGIDisplayModes.begin(),
+                       s_DXGIDisplayModes.end(),
+                       std::inserter(uniqueDisplayModeResolutions, uniqueDisplayModeResolutions.begin()),
+                       [&](const DXGI_MODE_DESC& mode) { return DirectX::XMINT2(mode.Width, mode.Height); });
 
-    std::transform(s_DXGIDisplayResolutions.begin(),
-                   s_DXGIDisplayResolutions.end(),
-                   std::back_inserter(s_DXGIDisplayResolutionsStr),
-                   [&](const DirectX::XMINT2& r) { return std::format("{} x {}", r.x, r.y); });
+        s_DXGIDisplayResolutions.resize(uniqueDisplayModeResolutions.size());
+        std::copy(uniqueDisplayModeResolutions.begin(), uniqueDisplayModeResolutions.end(), s_DXGIDisplayResolutions.begin());
+
+        std::transform(s_DXGIDisplayResolutions.begin(),
+                       s_DXGIDisplayResolutions.end(),
+                       std::back_inserter(s_DXGIDisplayResolutionsStr),
+                       [&](const DirectX::XMINT2& r) { return std::format("{} x {}", r.x, r.y); });
+    }
 }
 
 void InitializeGraphicsRuntime()
@@ -724,7 +719,8 @@ void RenderInterface()
     {
         StringListDropdown("Display", s_DXGIOutputNames, s_DXGIOutputsIndex);
 
-        StringListDropdown("Resolution", s_DXGIDisplayResolutionsStr, s_DXGIDisplayModesIndex);
+        if (StringListDropdown("Resolution", s_DXGIDisplayResolutionsStr, s_DXGIDisplayResolutionsIndex))
+            s_UpdateFlags |= UpdateFlags::SwapChainResize;
 
         if (StringListDropdown("Adapter", s_DXGIAdapterNames, s_DXGIAdapterIndex))
             s_UpdateFlags |= UpdateFlags::GraphicsRuntime;
@@ -733,10 +729,11 @@ void RenderInterface()
             s_UpdateFlags |= UpdateFlags::Window;
 
         if (EnumDropdown<SwapEffect>("Swap Effect", reinterpret_cast<int*>(&s_DXGISwapEffect)))
-            s_UpdateFlags |= UpdateFlags::SwapChain;
+            s_UpdateFlags |= UpdateFlags::SwapChainRecreate;
 
+        // TODO: Might be able to resize here?
         if (ImGui::SliderInt("Buffering", reinterpret_cast<int*>(&s_SwapChainImageCount), 2, DXGI_MAX_SWAP_CHAIN_BUFFERS - 1))
-            s_UpdateFlags |= UpdateFlags::SwapChain;
+            s_UpdateFlags |= UpdateFlags::SwapChainRecreate;
 
         ImGui::SliderInt("V-Sync Interval", &s_SyncInterval, 0, 4);
 
@@ -940,7 +937,7 @@ void UpdateWindow()
             if (s_WindowModePrev == WindowMode::Windowed)
                 GetWindowRect(s_Window, &s_WindowRect);
 
-            if (SUCCEEDED(s_DXGISwapChain->SetFullscreenState(true, s_DXGIOutputs[s_DXGIDisplayModesIndex])))
+            if (SUCCEEDED(s_DXGISwapChain->SetFullscreenState(true, s_DXGIOutputs[s_DXGIOutputsIndex])))
             {
                 // If swapping from borderless mode, we need to manually resize the swapchain here instead of
                 // the WM_SIZE windows message proc since the borderless fullscreen + exclusive fullscreen are the same size.
@@ -984,22 +981,34 @@ void SyncSettings()
         InitializeGraphicsRuntime();
     }
 
-    if ((s_UpdateFlags & UpdateFlags::SwapChain) != 0)
+    if ((s_UpdateFlags & UpdateFlags::SwapChainRecreate) != 0)
     {
         WaitForDevice();
 
-        spdlog::info("Updating Swap Chain");
+        spdlog::info("Re-creating Swap Chain");
 
         ReleaseSwapChain();
 
         CreateSwapChain();
     }
 
-    if ((s_UpdateFlags & UpdateFlags::DisplayModeChange) != 0)
+    if ((s_UpdateFlags & UpdateFlags::SwapChainResize) != 0)
     {
         WaitForDevice();
 
-        ThrowIfFailed(s_DXGISwapChain->ResizeTarget(&s_DXGIDisplayModes[s_DXGIDisplayModesIndex]));
+        spdlog::info("Resizing Swap Chain");
+
+        DXGI_MODE_DESC targetDisplayMode = s_DXGIDisplayModes[s_DXGIDisplayModes.size() - 1];
+        {
+            targetDisplayMode.Width  = s_DXGIDisplayResolutions[s_DXGIDisplayResolutionsIndex].x;
+            targetDisplayMode.Height = s_DXGIDisplayResolutions[s_DXGIDisplayResolutionsIndex].y;
+        }
+
+        // Reconstruct the closest-matching display mode based on the user selections of resolution, refresh rate, etc.
+        DXGI_MODE_DESC closestDisplayMode;
+        ThrowIfFailed(s_DXGIOutputs[s_DXGIOutputsIndex]->FindClosestMatchingMode(&targetDisplayMode, &closestDisplayMode, nullptr));
+
+        ThrowIfFailed(s_DXGISwapChain->ResizeTarget(&closestDisplayMode));
     }
 
     if ((s_UpdateFlags & UpdateFlags::Window) != 0)
@@ -1088,12 +1097,16 @@ LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPara
 
         case WM_SIZE:
         {
+#if 0
+            s_ViewportSizeOutput = s_DXGIDisplayResolutions[s_DXGIDisplayResolutionsIndex];
+#else
             RECT clientRect = {};
 
             GetClientRect(hWnd, &clientRect);
 
             s_ViewportSizeOutput.x = clientRect.right - clientRect.left;
             s_ViewportSizeOutput.y = clientRect.bottom - clientRect.top;
+#endif
 
             ResizeSwapChain();
 
