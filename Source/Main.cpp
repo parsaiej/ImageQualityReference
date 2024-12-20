@@ -716,8 +716,7 @@ void RenderInterface()
     ImGui::SetNextWindowSize(ImVec2((float)s_ViewportSizeOutput.x * 0.25f, (float)s_ViewportSizeOutput.y));
     ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, FLT_MAX));
 
-    if (!ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize))
-        return;
+    ImGui::Begin("Settings", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize);
 
     ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.7f);
 
@@ -751,6 +750,11 @@ void RenderInterface()
             StringListDropdown("DirectSR Algorithm", s_DSRVariantNames, s_DSRVariantIndex);
         else
             StringListDropdown("DirectSR Algorithm", { "None" }, s_DSRVariantIndex);
+    }
+
+    if (ImGui::CollapsingHeader("Analysis", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        ImGui::Text("TODO");
     }
 
     if (ImGui::CollapsingHeader("Performance", ImGuiTreeNodeFlags_DefaultOpen))
@@ -834,6 +838,14 @@ void RenderInterface()
     }
 
     ImGui::PopItemWidth();
+
+    ImGui::End();
+
+    ImGui::SetNextWindowPos(ImVec2((float)s_ViewportSizeOutput.x * 0.25f, 0.0f));
+    ImGui::SetNextWindowSize(ImVec2((float)s_ViewportSizeOutput.x * 0.75f, (float)s_ViewportSizeOutput.y));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, FLT_MAX));
+
+    ImGui::Begin("Viewport", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
 
     ImGui::End();
 }
