@@ -58,4 +58,12 @@ struct XMINT2Cmp
     }
 };
 
+struct RefreshRateCmp
+{
+    bool operator()(const DXGI_RATIONAL& lhs, const DXGI_RATIONAL& rhs) const
+    {
+        return lhs.Numerator * rhs.Denominator < rhs.Numerator * lhs.Denominator;
+    }
+};
+
 #endif

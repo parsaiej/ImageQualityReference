@@ -78,9 +78,13 @@ std::vector<DXGI_MODE_DESC>     s_DXGIDisplayModes;
 std::vector<DirectX::XMINT2> s_DXGIDisplayResolutions;
 std::vector<std::string>     s_DXGIDisplayResolutionsStr;
 
+std::vector<DXGI_RATIONAL> s_DXGIDisplayRefreshRates;
+std::vector<std::string>   s_DXGIDisplayRefreshRatesStr;
+
 int s_DXGIAdapterIndex;
 int s_DXGIOutputsIndex;
 int s_DXGIDisplayResolutionsIndex;
+int s_DXGIDisplayRefreshRatesIndex;
 
 // Adapted from all found DXGI_ADAPTER_DESC1 for easy display in the UI.
 std::vector<std::string> s_DXGIAdapterNames;
@@ -202,6 +206,9 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
     {
         // Select a resolution size from the list, around the half-largest one.
         s_DXGIDisplayResolutionsIndex = static_cast<int>(s_DXGIDisplayResolutions.size()) / 2;
+
+        // Select the largest refresh rate.
+        s_DXGIDisplayRefreshRatesIndex = static_cast<int>(s_DXGIDisplayRefreshRates.size()) - 1;
 
         s_BackBufferSize = s_DXGIDisplayResolutions[s_DXGIDisplayResolutionsIndex];
 
@@ -473,12 +480,19 @@ void UpdateWindowAndUpdateSwapChain()
         }
     }
 
-    spdlog::info("Resizing Swap Chain ({}x{} --> {}x{})", s_BackBufferSizePrev.x, s_BackBufferSizePrev.y, s_BackBufferSize.x, s_BackBufferSize.y);
+    spdlog::info("Modify Swap Chain ({}x{} --> {}x{} @ {} Hz)",
+                 s_BackBufferSizePrev.x,
+                 s_BackBufferSizePrev.y,
+                 s_BackBufferSize.x,
+                 s_BackBufferSize.y,
+                 s_DXGIDisplayRefreshRates[s_DXGIDisplayRefreshRatesIndex].Numerator /
+                     s_DXGIDisplayRefreshRates[s_DXGIDisplayRefreshRatesIndex].Denominator);
 
     DXGI_MODE_DESC targetDisplayMode = s_DXGIDisplayModes[s_DXGIDisplayModes.size() - 1];
     {
-        targetDisplayMode.Width  = s_BackBufferSize.x;
-        targetDisplayMode.Height = s_BackBufferSize.y;
+        targetDisplayMode.Width       = s_BackBufferSize.x;
+        targetDisplayMode.Height      = s_BackBufferSize.y;
+        targetDisplayMode.RefreshRate = s_DXGIDisplayRefreshRates[s_DXGIDisplayRefreshRatesIndex];
     }
 
     // Reconstruct the closest-matching display mode based on the user selections of resolution, refresh rate, etc.
@@ -608,6 +622,25 @@ void EnumerateDisplayModes()
                        s_DXGIDisplayResolutions.end(),
                        std::back_inserter(s_DXGIDisplayResolutionsStr),
                        [&](const DirectX::XMINT2& r) { return std::format("{} x {}", r.x, r.y); });
+    }
+
+    // Extract list of refresh rates.
+    // ----------------------------------------------------------
+    {
+        std::set<DXGI_RATIONAL, RefreshRateCmp> uniqueRefreshRates;
+
+        std::transform(s_DXGIDisplayModes.begin(),
+                       s_DXGIDisplayModes.end(),
+                       std::inserter(uniqueRefreshRates, uniqueRefreshRates.begin()),
+                       [&](const DXGI_MODE_DESC& mode) { return mode.RefreshRate; });
+
+        s_DXGIDisplayRefreshRates.resize(uniqueRefreshRates.size());
+        std::copy(uniqueRefreshRates.begin(), uniqueRefreshRates.end(), s_DXGIDisplayRefreshRates.begin());
+
+        std::transform(s_DXGIDisplayRefreshRates.begin(),
+                       s_DXGIDisplayRefreshRates.end(),
+                       std::back_inserter(s_DXGIDisplayRefreshRatesStr),
+                       [&](const DXGI_RATIONAL& r) { return std::format("{} Hz", r.Numerator / r.Denominator); });
     }
 }
 
@@ -806,6 +839,9 @@ void RenderInterface()
             s_UpdateFlags |= UpdateFlags::SwapChainResize;
 
         ImGui::EndDisabled();
+
+        if (StringListDropdown("Refresh Rate", s_DXGIDisplayRefreshRatesStr, s_DXGIDisplayRefreshRatesIndex))
+            s_UpdateFlags |= UpdateFlags::SwapChainResize;
 
         if (StringListDropdown("Adapter", s_DXGIAdapterNames, s_DXGIAdapterIndex))
             s_UpdateFlags |= UpdateFlags::GraphicsRuntime;
