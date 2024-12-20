@@ -7,6 +7,10 @@ extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\
 // Import the imgui style.
 #include "OverlayStyle.h"
 
+// Ref
+// -----------------------------
+// https://www.intel.com/content/www/us/en/developer/articles/code-sample/sample-application-for-direct3d-12-flip-model-swap-chains.html
+
 // Options
 // -----------------------------
 
@@ -35,88 +39,90 @@ enum UpdateFlags : uint32_t
 // State
 // -----------------------------
 
-HINSTANCE   s_Instance     = nullptr;
-GLFWwindow* s_Window       = nullptr;
-HWND        s_WindowNative = nullptr;
+HINSTANCE   gInstance     = nullptr;
+GLFWwindow* gWindow       = nullptr;
+HWND        gWindowNative = nullptr;
 
-WindowMode s_WindowMode     = WindowMode::Windowed;
-WindowMode s_WindowModePrev = WindowMode::Windowed;
+WindowMode gWindowMode     = WindowMode::Windowed;
+WindowMode gWindowModePrev = WindowMode::Windowed;
 
-int s_CurrentSwapChainImageIndex;
-int s_RTVDescriptorSize;
-int s_SRVDescriptorSize;
+int gCurrentSwapChainImageIndex;
+int gRTVDescriptorSize;
+int gSRVDescriptorSize;
 
-ComPtr<ID3D12Device>              s_LogicalDevice     = nullptr;
-ComPtr<IDSRDevice>                s_DSRDevice         = nullptr;
-ComPtr<ID3D12CommandQueue>        s_CommandQueue      = nullptr;
-ComPtr<ID3D12DescriptorHeap>      s_RTVDescriptorHeap = nullptr;
-ComPtr<ID3D12DescriptorHeap>      s_SRVDescriptorHeap = nullptr;
-ComPtr<ID3D12CommandAllocator>    s_CommandAllocator  = nullptr;
-ComPtr<ID3D12GraphicsCommandList> s_CommandList       = nullptr;
+ComPtr<ID3D12Device>              gLogicalDevice     = nullptr;
+ComPtr<IDSRDevice>                gDSRDevice         = nullptr;
+ComPtr<ID3D12CommandQueue>        gCommandQueue      = nullptr;
+ComPtr<ID3D12DescriptorHeap>      gRTVDescriptorHeap = nullptr;
+ComPtr<ID3D12DescriptorHeap>      gSRVDescriptorHeap = nullptr;
+ComPtr<ID3D12CommandAllocator>    gCommandAllocator  = nullptr;
+ComPtr<ID3D12GraphicsCommandList> gCommandList       = nullptr;
 
-std::vector<ComPtr<ID3D12Resource>> s_SwapChainImages;
-uint32_t                            s_SwapChainImageCount = 2;
+std::vector<ComPtr<ID3D12Resource>> gSwapChainImages;
+uint32_t                            gSwapChainImageCount = 2;
 
-int                                    s_DSRVariantIndex;
-std::vector<DSR_SUPERRES_VARIANT_DESC> s_DSRVariantDescs;
-std::vector<std::string>               s_DSRVariantNames;
+int                                    gDSRVariantIndex;
+std::vector<DSR_SUPERRES_VARIANT_DESC> gDSRVariantDescs;
+std::vector<std::string>               gDSRVariantNames;
 
-ComPtr<ID3D12Fence> s_Fence                     = nullptr;
-HANDLE              s_FenceOperatingSystemEvent = nullptr;
-UINT64              s_FenceValue                = 0U;
+ComPtr<ID3D12Fence> gFence                     = nullptr;
+HANDLE              gFenceOperatingSystemEvent = nullptr;
+UINT64              gFenceValue                = 0U;
 
 // Process -> Adapter -> Display (DXGI)
-ComPtr<IDXGIAdapter1>           s_DXGIAdapter;
-ComPtr<IDXGIFactory6>           s_DXGIFactory;
-ComPtr<IDXGISwapChain3>         s_DXGISwapChain;
-std::vector<DXGI_ADAPTER_DESC1> s_DXGIAdapterInfos;
-SwapEffect                      s_DXGISwapEffect;
-std::vector<IDXGIOutput*>       s_DXGIOutputs;
-std::vector<std::string>        s_DXGIOutputNames;
-std::vector<DXGI_MODE_DESC>     s_DXGIDisplayModes;
+ComPtr<IDXGIAdapter1>           gDXGIAdapter;
+ComPtr<IDXGIFactory6>           gDXGIFactory;
+ComPtr<IDXGISwapChain3>         gDXGISwapChain;
+std::vector<DXGI_ADAPTER_DESC1> gDXGIAdapterInfos;
+SwapEffect                      gDXGISwapEffect;
+std::vector<IDXGIOutput*>       gDXGIOutputs;
+std::vector<std::string>        gDXGIOutputNames;
+std::vector<DXGI_MODE_DESC>     gDXGIDisplayModes;
 
-std::vector<DirectX::XMINT2> s_DXGIDisplayResolutions;
-std::vector<std::string>     s_DXGIDisplayResolutionsStr;
+std::vector<DirectX::XMINT2> gDXGIDisplayResolutions;
+std::vector<std::string>     gDXGIDisplayResolutionsStr;
 
-std::vector<DXGI_RATIONAL> s_DXGIDisplayRefreshRates;
-std::vector<std::string>   s_DXGIDisplayRefreshRatesStr;
+std::vector<DXGI_RATIONAL> gDXGIDisplayRefreshRates;
+std::vector<std::string>   gDXGIDisplayRefreshRatesStr;
 
-int s_DXGIAdapterIndex;
-int s_DXGIOutputsIndex;
-int s_DXGIDisplayResolutionsIndex;
-int s_DXGIDisplayRefreshRatesIndex;
+int gDXGIAdapterIndex;
+int gDXGIOutputsIndex;
+int gDXGIDisplayResolutionsIndex;
+int gDXGIDisplayRefreshRatesIndex;
 
 // Adapted from all found DXGI_ADAPTER_DESC1 for easy display in the UI.
-std::vector<std::string> s_DXGIAdapterNames;
+std::vector<std::string> gDXGIAdapterNames;
 
 // Log buffer memory.
-std::shared_ptr<std::stringstream> s_LoggerMemory;
+std::shared_ptr<std::stringstream> gLoggerMemory;
 
 // Time since last present.
-float s_DeltaTime = 0.0;
+float gDeltaTime = 0.0;
 
 // Maintain a 120-frame moving average for the delta time.
-MovingAverage s_DeltaTimeMovingAverage(60);
+MovingAverage gDeltaTimeMovingAverage(60);
 
 // Ring buffer for frame time (ms) + moving average
-ScrollingBuffer s_DeltaTimeBuffer;
-ScrollingBuffer s_DeltaTimeMovingAverageBuffer;
+ScrollingBuffer gDeltaTimeBuffer;
+ScrollingBuffer gDeltaTimeMovingAverageBuffer;
 
 // V-Sync Interval requested by user.
-int s_SyncInterval;
+int gSyncInterval;
 
 // Current update flags for the frame.
-uint32_t s_UpdateFlags;
+uint32_t gUpdateFlags;
 
 // Output (post-upscaled) viewport resolution.
-DirectX::XMINT2 s_BackBufferSize { 1280, 720 };
-DirectX::XMINT2 s_BackBufferSizePrev { 1280, 720 };
+DirectX::XMINT2 gBackBufferSize { 1280, 720 };
+DirectX::XMINT2 gBackBufferSizePrev { 1280, 720 };
 
 // Cached window rect if going from fullscreen -> window.
-RECT s_WindowRect;
-UINT s_WindowStyle = WS_OVERLAPPEDWINDOW | WS_SYSMENU;
+RECT gWindowRect;
+UINT gWindowStyle = WS_OVERLAPPEDWINDOW | WS_SYSMENU;
 
-StopWatch s_StopWatch;
+StopWatch gStopWatch;
+
+tbb::task_group gTaskGroup;
 
 // Utility Prototypes
 // -----------------------------
@@ -165,7 +171,7 @@ void SyncSettings();
 
 _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
 {
-    s_Instance = hInstance;
+    gInstance = hInstance;
 
     // Flush on critical events since we usually fatally crash the app right after.
     spdlog::flush_on(spdlog::level::critical);
@@ -173,8 +179,8 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
     // Configure logging.
     // --------------------------------------
 
-    s_LoggerMemory  = std::make_shared<std::stringstream>();
-    auto loggerSink = std::make_shared<spdlog::sinks::ostream_sink_mt>(*s_LoggerMemory);
+    gLoggerMemory   = std::make_shared<std::stringstream>();
+    auto loggerSink = std::make_shared<spdlog::sinks::ostream_sink_mt>(*gLoggerMemory);
     auto logger     = std::make_shared<spdlog::logger>("", loggerSink);
 
     spdlog::set_default_logger(logger);
@@ -184,20 +190,24 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
     spdlog::set_level(spdlog::level::debug);
 #endif
 
-    EnumerateSupportedAdapters();
+    // Overlap adapter enumeration with window creation.
+    gTaskGroup.run([] { EnumerateSupportedAdapters(); });
 
     // Create operating system window.
     // -----------------------------------------
     {
         glfwInit();
 
-        s_Window = glfwCreateWindow(s_BackBufferSize.x, s_BackBufferSize.y, "ImageClarityReference", nullptr, nullptr);
+        gWindow = glfwCreateWindow(gBackBufferSize.x, gBackBufferSize.y, "ImageClarityReference", nullptr, nullptr);
 
-        if (!s_Window)
+        if (!gWindow)
             exit(1);
 
-        s_WindowNative = glfwGetWin32Window(s_Window);
+        gWindowNative = glfwGetWin32Window(gWindow);
     }
+
+    // Wait for adapter enumeration to complete.
+    gTaskGroup.wait();
 
     InitializeGraphicsRuntime();
 
@@ -205,18 +215,18 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
     // -----------------------------------------
     {
         // Select a resolution size from the list, around the half-largest one.
-        s_DXGIDisplayResolutionsIndex = static_cast<int>(s_DXGIDisplayResolutions.size()) / 2;
+        gDXGIDisplayResolutionsIndex = static_cast<int>(gDXGIDisplayResolutions.size()) / 2;
 
         // Select the largest refresh rate.
-        s_DXGIDisplayRefreshRatesIndex = static_cast<int>(s_DXGIDisplayRefreshRates.size()) - 1;
+        gDXGIDisplayRefreshRatesIndex = static_cast<int>(gDXGIDisplayRefreshRates.size()) - 1;
 
-        s_BackBufferSize = s_DXGIDisplayResolutions[s_DXGIDisplayResolutionsIndex];
+        gBackBufferSize = gDXGIDisplayResolutions[gDXGIDisplayResolutionsIndex];
 
         // Queue a resize on the next render call.
-        s_UpdateFlags |= UpdateFlags::SwapChainResize;
+        gUpdateFlags |= UpdateFlags::SwapChainResize;
     }
 
-    while (!glfwWindowShouldClose(s_Window))
+    while (!glfwWindowShouldClose(gWindow))
     {
         glfwPollEvents();
 
@@ -225,7 +235,7 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
 
     ReleaseGraphicsRuntime();
 
-    for (auto& pOutput : s_DXGIOutputs)
+    for (auto& pOutput : gDXGIOutputs)
     {
         if (pOutput)
             pOutput->Release();
@@ -305,8 +315,8 @@ void EnumerateSupportedAdapters()
 
     ComPtr<IDXGIAdapter1> pAdapter;
 
-    s_DXGIAdapterInfos.clear();
-    s_DXGIAdapterNames.clear();
+    gDXGIAdapterInfos.clear();
+    gDXGIAdapterNames.clear();
 
     for (UINT adapterIndex = 0;
          SUCCEEDED(pDXGIFactory->EnumAdapterByGpuPreference(adapterIndex, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&pAdapter)));
@@ -318,16 +328,16 @@ void EnumerateSupportedAdapters()
         DXGI_ADAPTER_DESC1 desc;
         pAdapter->GetDesc1(&desc);
 
-        s_DXGIAdapterInfos.push_back(desc);
+        gDXGIAdapterInfos.push_back(desc);
     }
 
     // Extract a list of supported adapter names for presentation to the user.
-    std::transform(s_DXGIAdapterInfos.begin(),
-                   s_DXGIAdapterInfos.end(),
-                   std::back_inserter(s_DXGIAdapterNames),
+    std::transform(gDXGIAdapterInfos.begin(),
+                   gDXGIAdapterInfos.end(),
+                   std::back_inserter(gDXGIAdapterNames),
                    [](const DXGI_ADAPTER_DESC1& adapter) { return FromWideStr(adapter.Description); });
 
-    if (!s_DXGIAdapterInfos.empty())
+    if (!gDXGIAdapterInfos.empty())
         return;
 
     MessageBox(nullptr,
@@ -342,14 +352,14 @@ void EnumerateSupportedAdapters()
 void CreateSwapChain()
 {
     DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
-    swapChainDesc.BufferCount           = s_SwapChainImageCount;
-    swapChainDesc.Width                 = static_cast<UINT>(s_BackBufferSize.x);
-    swapChainDesc.Height                = static_cast<UINT>(s_BackBufferSize.y);
+    swapChainDesc.BufferCount           = gSwapChainImageCount;
+    swapChainDesc.Width                 = static_cast<UINT>(gBackBufferSize.x);
+    swapChainDesc.Height                = static_cast<UINT>(gBackBufferSize.y);
     swapChainDesc.Format                = DXGI_FORMAT_R8G8B8A8_UNORM;
     swapChainDesc.BufferUsage           = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     swapChainDesc.SampleDesc.Count      = 1;
 
-    switch (s_DXGISwapEffect)
+    switch (gDXGISwapEffect)
     {
         // D3D12 only support DXGI_EFFECT_FLIP_* so we need to adapt for it.
         case SwapEffect::FlipDiscard   : swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD; break;
@@ -358,88 +368,88 @@ void CreateSwapChain()
 
     ComPtr<IDXGISwapChain1> swapChain;
     ThrowIfFailed(
-        s_DXGIFactory->CreateSwapChainForHwnd(s_CommandQueue.Get(), s_WindowNative, &swapChainDesc, nullptr, nullptr, swapChain.GetAddressOf()));
+        gDXGIFactory->CreateSwapChainForHwnd(gCommandQueue.Get(), gWindowNative, &swapChainDesc, nullptr, nullptr, swapChain.GetAddressOf()));
 
     // Does not support fullscreen transitions.
-    ThrowIfFailed(s_DXGIFactory->MakeWindowAssociation(s_WindowNative, DXGI_MWA_NO_ALT_ENTER));
+    ThrowIfFailed(gDXGIFactory->MakeWindowAssociation(gWindowNative, DXGI_MWA_NO_ALT_ENTER));
 
-    ThrowIfFailed(swapChain.As(&s_DXGISwapChain));
-    s_CurrentSwapChainImageIndex = s_DXGISwapChain->GetCurrentBackBufferIndex();
+    ThrowIfFailed(swapChain.As(&gDXGISwapChain));
+    gCurrentSwapChainImageIndex = gDXGISwapChain->GetCurrentBackBufferIndex();
 
-    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(s_RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(gRTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 
-    s_SwapChainImages.resize(s_SwapChainImageCount);
+    gSwapChainImages.resize(gSwapChainImageCount);
 
-    for (UINT swapChainImageIndex = 0; swapChainImageIndex < s_SwapChainImageCount; swapChainImageIndex++)
+    for (UINT swapChainImageIndex = 0; swapChainImageIndex < gSwapChainImageCount; swapChainImageIndex++)
     {
-        ThrowIfFailed(s_DXGISwapChain->GetBuffer(swapChainImageIndex, IID_PPV_ARGS(&s_SwapChainImages[swapChainImageIndex])));
-        s_LogicalDevice->CreateRenderTargetView(s_SwapChainImages[swapChainImageIndex].Get(), nullptr, rtvHandle);
-        rtvHandle.Offset(1, s_RTVDescriptorSize);
+        ThrowIfFailed(gDXGISwapChain->GetBuffer(swapChainImageIndex, IID_PPV_ARGS(&gSwapChainImages[swapChainImageIndex])));
+        gLogicalDevice->CreateRenderTargetView(gSwapChainImages[swapChainImageIndex].Get(), nullptr, rtvHandle);
+        rtvHandle.Offset(1, gRTVDescriptorSize);
     }
 }
 
 void ReleaseSwapChain()
 {
     // Need to force disable fullscreen in order to destroy swap chain.
-    ThrowIfFailed(s_DXGISwapChain->SetFullscreenState(false, nullptr));
+    ThrowIfFailed(gDXGISwapChain->SetFullscreenState(false, nullptr));
 
-    for (auto& swapChainImageView : s_SwapChainImages)
+    for (auto& swapChainImageView : gSwapChainImages)
     {
         if (swapChainImageView)
             swapChainImageView.Reset();
     }
 
-    s_DXGISwapChain.Reset();
+    gDXGISwapChain.Reset();
 }
 
-DirectX::XMINT2 s_PreviousWindowedPos;
-DirectX::XMINT2 s_PreviousWindowedSize;
-int             s_DXGIDisplayResolutionsIndexPrev;
+DirectX::XMINT2 gPreviousWindowedPos;
+DirectX::XMINT2 gPreviousWindowedSize;
+int             gDXGIDisplayResolutionsIndexPrev;
 
 void UpdateWindowAndUpdateSwapChain()
 {
-    switch (s_WindowMode)
+    switch (gWindowMode)
     {
         case WindowMode::BorderlessFullscreen:
         case WindowMode::ExclusiveFullscreen:
         {
-            if (s_WindowModePrev != WindowMode::Windowed)
+            if (gWindowModePrev != WindowMode::Windowed)
                 break;
 
             // Cache the windowed window if making fullscreen transition.
-            s_DXGIDisplayResolutionsIndexPrev = s_DXGIDisplayResolutionsIndex;
-            glfwGetWindowPos(s_Window, &s_PreviousWindowedPos.x, &s_PreviousWindowedPos.y);
-            glfwGetWindowSize(s_Window, &s_PreviousWindowedSize.x, &s_PreviousWindowedSize.y);
+            gDXGIDisplayResolutionsIndexPrev = gDXGIDisplayResolutionsIndex;
+            glfwGetWindowPos(gWindow, &gPreviousWindowedPos.x, &gPreviousWindowedPos.y);
+            glfwGetWindowSize(gWindow, &gPreviousWindowedSize.x, &gPreviousWindowedSize.y);
         }
 
         default: break;
     }
 
     // Handle DXGI / GLFW changes.
-    switch (s_WindowMode)
+    switch (gWindowMode)
     {
         case WindowMode::Windowed:
         {
-            ThrowIfFailed(s_DXGISwapChain->SetFullscreenState(false, nullptr));
-            glfwSetWindowSize(s_Window, s_BackBufferSize.x, s_BackBufferSize.y);
-            glfwSetWindowAttrib(s_Window, GLFW_DECORATED, GLFW_TRUE);
+            ThrowIfFailed(gDXGISwapChain->SetFullscreenState(false, nullptr));
+            glfwSetWindowSize(gWindow, gBackBufferSize.x, gBackBufferSize.y);
+            glfwSetWindowAttrib(gWindow, GLFW_DECORATED, GLFW_TRUE);
             break;
         }
 
         case WindowMode::BorderlessFullscreen:
         {
-            ThrowIfFailed(s_DXGISwapChain->SetFullscreenState(false, nullptr));
-            glfwSetWindowAttrib(s_Window, GLFW_DECORATED, GLFW_FALSE);
-            glfwSetWindowMonitor(s_Window, nullptr, 0, 0, s_BackBufferSize.x, s_BackBufferSize.y, 0);
+            ThrowIfFailed(gDXGISwapChain->SetFullscreenState(false, nullptr));
+            glfwSetWindowAttrib(gWindow, GLFW_DECORATED, GLFW_FALSE);
+            glfwSetWindowMonitor(gWindow, nullptr, 0, 0, gBackBufferSize.x, gBackBufferSize.y, 0);
             break;
         }
 
         case WindowMode::ExclusiveFullscreen:
         {
-            if (FAILED(s_DXGISwapChain->SetFullscreenState(true, nullptr)))
+            if (FAILED(gDXGISwapChain->SetFullscreenState(true, nullptr)))
             {
                 spdlog::info("Failed to go fullscreen. The adapter may not own the output display. Reverting to borderless.");
-                s_WindowMode = WindowMode::BorderlessFullscreen;
+                gWindowMode = WindowMode::BorderlessFullscreen;
                 UpdateWindowAndUpdateSwapChain();
                 return;
             }
@@ -449,86 +459,86 @@ void UpdateWindowAndUpdateSwapChain()
     }
 
     // Handle backbuffer sizes.
-    switch (s_WindowMode)
+    switch (gWindowMode)
     {
         case WindowMode::Windowed:
         {
-            if (s_WindowModePrev != WindowMode::Windowed)
+            if (gWindowModePrev != WindowMode::Windowed)
             {
-                s_DXGIDisplayResolutionsIndex = s_DXGIDisplayResolutionsIndexPrev;
+                gDXGIDisplayResolutionsIndex = gDXGIDisplayResolutionsIndexPrev;
 
                 // Restore cached window if making fullscreen transition.
-                glfwSetWindowMonitor(s_Window,
+                glfwSetWindowMonitor(gWindow,
                                      nullptr,
-                                     s_PreviousWindowedPos.x,
-                                     s_PreviousWindowedPos.y,
-                                     s_PreviousWindowedSize.x,
-                                     s_PreviousWindowedSize.y,
+                                     gPreviousWindowedPos.x,
+                                     gPreviousWindowedPos.y,
+                                     gPreviousWindowedSize.x,
+                                     gPreviousWindowedSize.y,
                                      0);
             }
 
-            s_BackBufferSize = s_DXGIDisplayResolutions[s_DXGIDisplayResolutionsIndex];
+            gBackBufferSize = gDXGIDisplayResolutions[gDXGIDisplayResolutionsIndex];
             break;
         }
 
         case WindowMode::BorderlessFullscreen:
         case WindowMode::ExclusiveFullscreen:
         {
-            s_DXGIDisplayResolutionsIndex = static_cast<int>(s_DXGIDisplayResolutions.size()) - 1;
-            s_BackBufferSize              = s_DXGIDisplayResolutions[s_DXGIDisplayResolutionsIndex];
+            gDXGIDisplayResolutionsIndex = static_cast<int>(gDXGIDisplayResolutions.size()) - 1;
+            gBackBufferSize              = gDXGIDisplayResolutions[gDXGIDisplayResolutionsIndex];
             break;
         }
     }
 
     spdlog::info("Modify Swap Chain ({}x{} --> {}x{} @ {} Hz)",
-                 s_BackBufferSizePrev.x,
-                 s_BackBufferSizePrev.y,
-                 s_BackBufferSize.x,
-                 s_BackBufferSize.y,
-                 s_DXGIDisplayRefreshRates[s_DXGIDisplayRefreshRatesIndex].Numerator /
-                     s_DXGIDisplayRefreshRates[s_DXGIDisplayRefreshRatesIndex].Denominator);
+                 gBackBufferSizePrev.x,
+                 gBackBufferSizePrev.y,
+                 gBackBufferSize.x,
+                 gBackBufferSize.y,
+                 gDXGIDisplayRefreshRates[gDXGIDisplayRefreshRatesIndex].Numerator /
+                     gDXGIDisplayRefreshRates[gDXGIDisplayRefreshRatesIndex].Denominator);
 
-    DXGI_MODE_DESC targetDisplayMode = s_DXGIDisplayModes[s_DXGIDisplayModes.size() - 1];
+    DXGI_MODE_DESC targetDisplayMode = gDXGIDisplayModes[gDXGIDisplayModes.size() - 1];
     {
-        targetDisplayMode.Width       = s_BackBufferSize.x;
-        targetDisplayMode.Height      = s_BackBufferSize.y;
-        targetDisplayMode.RefreshRate = s_DXGIDisplayRefreshRates[s_DXGIDisplayRefreshRatesIndex];
+        targetDisplayMode.Width       = gBackBufferSize.x;
+        targetDisplayMode.Height      = gBackBufferSize.y;
+        targetDisplayMode.RefreshRate = gDXGIDisplayRefreshRates[gDXGIDisplayRefreshRatesIndex];
     }
 
     // Reconstruct the closest-matching display mode based on the user selections of resolution, refresh rate, etc.
     DXGI_MODE_DESC closestDisplayMode;
-    ThrowIfFailed(s_DXGIOutputs[s_DXGIOutputsIndex]->FindClosestMatchingMode(&targetDisplayMode, &closestDisplayMode, nullptr));
+    ThrowIfFailed(gDXGIOutputs[gDXGIOutputsIndex]->FindClosestMatchingMode(&targetDisplayMode, &closestDisplayMode, nullptr));
 
-    ThrowIfFailed(s_DXGISwapChain->ResizeTarget(&closestDisplayMode));
+    ThrowIfFailed(gDXGISwapChain->ResizeTarget(&closestDisplayMode));
 
-    for (auto& swapChainImageView : s_SwapChainImages)
+    for (auto& swapChainImageView : gSwapChainImages)
         swapChainImageView.Reset();
 
     DXGI_SWAP_CHAIN_DESC swapChainInfo = {};
-    s_DXGISwapChain->GetDesc(&swapChainInfo);
+    gDXGISwapChain->GetDesc(&swapChainInfo);
 
-    ThrowIfFailed(s_DXGISwapChain->ResizeBuffers(s_SwapChainImageCount,
-                                                 s_BackBufferSize.x,
-                                                 s_BackBufferSize.y,
-                                                 swapChainInfo.BufferDesc.Format,
-                                                 swapChainInfo.Flags));
+    ThrowIfFailed(gDXGISwapChain->ResizeBuffers(gSwapChainImageCount,
+                                                gBackBufferSize.x,
+                                                gBackBufferSize.y,
+                                                swapChainInfo.BufferDesc.Format,
+                                                swapChainInfo.Flags));
 
-    s_CurrentSwapChainImageIndex = s_DXGISwapChain->GetCurrentBackBufferIndex();
+    gCurrentSwapChainImageIndex = gDXGISwapChain->GetCurrentBackBufferIndex();
 
-    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(s_RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(gRTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
 
-    s_SwapChainImages.resize(s_SwapChainImageCount);
+    gSwapChainImages.resize(gSwapChainImageCount);
 
-    for (UINT swapChainImageIndex = 0; swapChainImageIndex < s_SwapChainImageCount; swapChainImageIndex++)
+    for (UINT swapChainImageIndex = 0; swapChainImageIndex < gSwapChainImageCount; swapChainImageIndex++)
     {
-        ThrowIfFailed(s_DXGISwapChain->GetBuffer(swapChainImageIndex, IID_PPV_ARGS(s_SwapChainImages[swapChainImageIndex].GetAddressOf())));
-        s_LogicalDevice->CreateRenderTargetView(s_SwapChainImages[swapChainImageIndex].Get(), nullptr, rtvHandle);
+        ThrowIfFailed(gDXGISwapChain->GetBuffer(swapChainImageIndex, IID_PPV_ARGS(gSwapChainImages[swapChainImageIndex].GetAddressOf())));
+        gLogicalDevice->CreateRenderTargetView(gSwapChainImages[swapChainImageIndex].Get(), nullptr, rtvHandle);
 
-        rtvHandle.Offset(1, s_RTVDescriptorSize);
+        rtvHandle.Offset(1, gRTVDescriptorSize);
     }
 
-    s_BackBufferSizePrev = s_BackBufferSize;
-    s_WindowModePrev     = s_WindowMode;
+    gBackBufferSizePrev = gBackBufferSize;
+    gWindowModePrev     = gWindowMode;
 }
 
 void ReleaseGraphicsRuntime()
@@ -538,19 +548,19 @@ void ReleaseGraphicsRuntime()
     ImPlot::DestroyContext();
     ImGui::DestroyContext();
 
-    s_DSRDevice.Reset();
-    s_CommandAllocator->Reset();
-    s_CommandList.Reset();
-    s_CommandQueue.Reset();
-    s_SRVDescriptorHeap.Reset();
-    s_RTVDescriptorHeap.Reset();
-    s_Fence.Reset();
+    gDSRDevice.Reset();
+    gCommandAllocator->Reset();
+    gCommandList.Reset();
+    gCommandQueue.Reset();
+    gSRVDescriptorHeap.Reset();
+    gRTVDescriptorHeap.Reset();
+    gFence.Reset();
 
     ReleaseSwapChain();
 
-    s_DXGIAdapter.Reset();
-    s_DXGIFactory.Reset();
-    s_LogicalDevice.Reset();
+    gDXGIAdapter.Reset();
+    gDXGIFactory.Reset();
+    gLogicalDevice.Reset();
 }
 
 void EnumerateOutputDisplays()
@@ -559,33 +569,33 @@ void EnumerateOutputDisplays()
     //       due to ownership of the output being with the integrated GPU (i.e. Intel).
     //       Thus, we enumerate all adapters first and check each output that adapter owns.
 
-    for (auto& pOutput : s_DXGIOutputs)
+    for (auto& pOutput : gDXGIOutputs)
     {
         if (pOutput)
             pOutput->Release();
     }
 
-    s_DXGIOutputs.clear();
-    s_DXGIOutputNames.clear();
+    gDXGIOutputs.clear();
+    gDXGIOutputNames.clear();
 
     IDXGIAdapter* pAdapter;
     UINT          adapterIndex = 0u;
 
-    while (s_DXGIFactory->EnumAdapters(adapterIndex++, &pAdapter) != DXGI_ERROR_NOT_FOUND)
+    while (gDXGIFactory->EnumAdapters(adapterIndex++, &pAdapter) != DXGI_ERROR_NOT_FOUND)
     {
         IDXGIOutput* pOutput;
         UINT         outputIndex = 0u;
 
         while (pAdapter->EnumOutputs(outputIndex++, &pOutput) != DXGI_ERROR_NOT_FOUND)
-            s_DXGIOutputs.push_back(pOutput);
+            gDXGIOutputs.push_back(pOutput);
 
         pAdapter->Release();
     }
 
     // Extract list of names for overlay.
-    std::transform(s_DXGIOutputs.begin(),
-                   s_DXGIOutputs.end(),
-                   std::back_inserter(s_DXGIOutputNames),
+    std::transform(gDXGIOutputs.begin(),
+                   gDXGIOutputs.end(),
+                   std::back_inserter(gDXGIOutputNames),
                    [](IDXGIOutput* pOutput)
                    {
                        DXGI_OUTPUT_DESC outputInfo;
@@ -598,11 +608,11 @@ void EnumerateOutputDisplays()
 void EnumerateDisplayModes()
 {
     UINT displayModeCount;
-    ThrowIfFailed(s_DXGIOutputs[s_DXGIOutputsIndex]->GetDisplayModeList(DXGI_FORMAT_R8G8B8A8_UNORM, 0, &displayModeCount, nullptr));
+    ThrowIfFailed(gDXGIOutputs[gDXGIOutputsIndex]->GetDisplayModeList(DXGI_FORMAT_R8G8B8A8_UNORM, 0, &displayModeCount, nullptr));
 
-    s_DXGIDisplayModes.resize(displayModeCount);
+    gDXGIDisplayModes.resize(displayModeCount);
 
-    ThrowIfFailed(s_DXGIOutputs[s_DXGIOutputsIndex]->GetDisplayModeList(DXGI_FORMAT_R8G8B8A8_UNORM, 0, &displayModeCount, s_DXGIDisplayModes.data()));
+    ThrowIfFailed(gDXGIOutputs[gDXGIOutputsIndex]->GetDisplayModeList(DXGI_FORMAT_R8G8B8A8_UNORM, 0, &displayModeCount, gDXGIDisplayModes.data()));
 
     // Extract list of unique resolutions. (There may be multiples of the same resolution due
     // to various refresh rates, dxgi formats, etc.).
@@ -610,17 +620,17 @@ void EnumerateDisplayModes()
     {
         std::set<DirectX::XMINT2, XMINT2Cmp> uniqueDisplayModeResolutions;
 
-        std::transform(s_DXGIDisplayModes.begin(),
-                       s_DXGIDisplayModes.end(),
+        std::transform(gDXGIDisplayModes.begin(),
+                       gDXGIDisplayModes.end(),
                        std::inserter(uniqueDisplayModeResolutions, uniqueDisplayModeResolutions.begin()),
                        [&](const DXGI_MODE_DESC& mode) { return DirectX::XMINT2(mode.Width, mode.Height); });
 
-        s_DXGIDisplayResolutions.resize(uniqueDisplayModeResolutions.size());
-        std::copy(uniqueDisplayModeResolutions.begin(), uniqueDisplayModeResolutions.end(), s_DXGIDisplayResolutions.begin());
+        gDXGIDisplayResolutions.resize(uniqueDisplayModeResolutions.size());
+        std::copy(uniqueDisplayModeResolutions.begin(), uniqueDisplayModeResolutions.end(), gDXGIDisplayResolutions.begin());
 
-        std::transform(s_DXGIDisplayResolutions.begin(),
-                       s_DXGIDisplayResolutions.end(),
-                       std::back_inserter(s_DXGIDisplayResolutionsStr),
+        std::transform(gDXGIDisplayResolutions.begin(),
+                       gDXGIDisplayResolutions.end(),
+                       std::back_inserter(gDXGIDisplayResolutionsStr),
                        [&](const DirectX::XMINT2& r) { return std::format("{} x {}", r.x, r.y); });
     }
 
@@ -629,17 +639,17 @@ void EnumerateDisplayModes()
     {
         std::set<DXGI_RATIONAL, RefreshRateCmp> uniqueRefreshRates;
 
-        std::transform(s_DXGIDisplayModes.begin(),
-                       s_DXGIDisplayModes.end(),
+        std::transform(gDXGIDisplayModes.begin(),
+                       gDXGIDisplayModes.end(),
                        std::inserter(uniqueRefreshRates, uniqueRefreshRates.begin()),
                        [&](const DXGI_MODE_DESC& mode) { return mode.RefreshRate; });
 
-        s_DXGIDisplayRefreshRates.resize(uniqueRefreshRates.size());
-        std::copy(uniqueRefreshRates.begin(), uniqueRefreshRates.end(), s_DXGIDisplayRefreshRates.begin());
+        gDXGIDisplayRefreshRates.resize(uniqueRefreshRates.size());
+        std::copy(uniqueRefreshRates.begin(), uniqueRefreshRates.end(), gDXGIDisplayRefreshRates.begin());
 
-        std::transform(s_DXGIDisplayRefreshRates.begin(),
-                       s_DXGIDisplayRefreshRates.end(),
-                       std::back_inserter(s_DXGIDisplayRefreshRatesStr),
+        std::transform(gDXGIDisplayRefreshRates.begin(),
+                       gDXGIDisplayRefreshRates.end(),
+                       std::back_inserter(gDXGIDisplayRefreshRatesStr),
                        [&](const DXGI_RATIONAL& r) { return std::format("{} Hz", r.Numerator / r.Denominator); });
     }
 }
@@ -655,19 +665,19 @@ void InitializeGraphicsRuntime()
     // DXGI Adapter Selection
     // ------------------------------------------
 
-    ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(s_DXGIFactory.GetAddressOf())));
+    ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(gDXGIFactory.GetAddressOf())));
 
     ComPtr<IDXGIAdapter1> pAdapter;
-    for (UINT adapterIndex = 0; SUCCEEDED(s_DXGIFactory->EnumAdapters1(adapterIndex, &pAdapter)); ++adapterIndex)
+    for (UINT adapterIndex = 0; SUCCEEDED(gDXGIFactory->EnumAdapters1(adapterIndex, &pAdapter)); ++adapterIndex)
     {
         DXGI_ADAPTER_DESC1 desc;
         pAdapter->GetDesc1(&desc);
 
-        if (s_DXGIAdapterInfos[s_DXGIAdapterIndex].DeviceId == desc.DeviceId)
+        if (gDXGIAdapterInfos[gDXGIAdapterIndex].DeviceId == desc.DeviceId)
             break;
     }
 
-    s_DXGIAdapter = pAdapter.Detach();
+    gDXGIAdapter = pAdapter.Detach();
 
     EnumerateOutputDisplays();
 
@@ -683,13 +693,13 @@ void InitializeGraphicsRuntime()
     }
 #endif
 
-    ThrowIfFailed(D3D12CreateDevice(s_DXGIAdapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(s_LogicalDevice.GetAddressOf())));
+    ThrowIfFailed(D3D12CreateDevice(gDXGIAdapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(gLogicalDevice.GetAddressOf())));
 
     // Describe and create the command queue.
     D3D12_COMMAND_QUEUE_DESC queueDesc = {};
     queueDesc.Flags                    = D3D12_COMMAND_QUEUE_FLAG_NONE;
     queueDesc.Type                     = D3D12_COMMAND_LIST_TYPE_DIRECT;
-    ThrowIfFailed(s_LogicalDevice->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(s_CommandQueue.GetAddressOf())));
+    ThrowIfFailed(gLogicalDevice->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(gCommandQueue.GetAddressOf())));
 
     // Descriptor heaps.
     // ------------------------------------------
@@ -699,16 +709,16 @@ void InitializeGraphicsRuntime()
         rtvHeapDesc.NumDescriptors             = 32;
         rtvHeapDesc.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
         rtvHeapDesc.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-        ThrowIfFailed(s_LogicalDevice->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(s_RTVDescriptorHeap.GetAddressOf())));
+        ThrowIfFailed(gLogicalDevice->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(gRTVDescriptorHeap.GetAddressOf())));
 
         D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
         srvHeapDesc.NumDescriptors             = 32;
         srvHeapDesc.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
         srvHeapDesc.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-        ThrowIfFailed(s_LogicalDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(s_SRVDescriptorHeap.GetAddressOf())));
+        ThrowIfFailed(gLogicalDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(gSRVDescriptorHeap.GetAddressOf())));
 
-        s_RTVDescriptorSize = s_LogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-        s_SRVDescriptorSize = s_LogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+        gRTVDescriptorSize = gLogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+        gSRVDescriptorSize = gLogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     }
 
     // ------------------------------------------
@@ -717,7 +727,7 @@ void InitializeGraphicsRuntime()
 
     // ------------------------------------------
 
-    ThrowIfFailed(s_LogicalDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(s_CommandAllocator.GetAddressOf())));
+    ThrowIfFailed(gLogicalDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(gCommandAllocator.GetAddressOf())));
 
     // Initialize DirectSR device.
     // ------------------------------------------
@@ -728,50 +738,50 @@ void InitializeGraphicsRuntime()
         if (FAILED(D3D12GetInterface(CLSID_D3D12DSRDeviceFactory, IID_PPV_ARGS(&pDSRDeviceFactory))))
             break;
 
-        if (FAILED(pDSRDeviceFactory->CreateDSRDevice(s_LogicalDevice.Get(), 1, IID_PPV_ARGS(s_DSRDevice.GetAddressOf()))))
+        if (FAILED(pDSRDeviceFactory->CreateDSRDevice(gLogicalDevice.Get(), 1, IID_PPV_ARGS(gDSRDevice.GetAddressOf()))))
             break;
 
-        s_DSRVariantDescs.resize(s_DSRDevice->GetNumSuperResVariants());
+        gDSRVariantDescs.resize(gDSRDevice->GetNumSuperResVariants());
 
-        for (UINT variantIndex = 0; variantIndex < s_DSRVariantDescs.size(); variantIndex++)
+        for (UINT variantIndex = 0; variantIndex < gDSRVariantDescs.size(); variantIndex++)
         {
             DSR_SUPERRES_VARIANT_DESC variantDesc;
-            ThrowIfFailed(s_DSRDevice->GetSuperResVariantDesc(variantIndex, &variantDesc));
+            ThrowIfFailed(gDSRDevice->GetSuperResVariantDesc(variantIndex, &variantDesc));
 
-            s_DSRVariantDescs[variantIndex] = variantDesc;
+            gDSRVariantDescs[variantIndex] = variantDesc;
         }
 
-        s_DSRVariantNames.clear();
-        s_DSRVariantIndex = 0;
+        gDSRVariantNames.clear();
+        gDSRVariantIndex = 0;
 
         // Enumerate variants names.
-        std::transform(s_DSRVariantDescs.begin(),
-                       s_DSRVariantDescs.end(),
-                       std::back_inserter(s_DSRVariantNames),
+        std::transform(gDSRVariantDescs.begin(),
+                       gDSRVariantDescs.end(),
+                       std::back_inserter(gDSRVariantNames),
                        [](const DSR_SUPERRES_VARIANT_DESC& variantDesc) { return variantDesc.VariantName; });
     }
     while (false);
 
-    ThrowIfFailed(s_LogicalDevice->CreateCommandList(0,
-                                                     D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                                     s_CommandAllocator.Get(),
-                                                     nullptr,
-                                                     IID_PPV_ARGS(s_CommandList.GetAddressOf())));
+    ThrowIfFailed(gLogicalDevice->CreateCommandList(0,
+                                                    D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                                    gCommandAllocator.Get(),
+                                                    nullptr,
+                                                    IID_PPV_ARGS(gCommandList.GetAddressOf())));
 
-    ThrowIfFailed(s_CommandList->Close());
+    ThrowIfFailed(gCommandList->Close());
 
     // Frames-in-flight synchronization objects.
     // ------------------------------------------
 
     {
-        ThrowIfFailed(s_LogicalDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(s_Fence.GetAddressOf())));
-        s_FenceValue = 1;
+        ThrowIfFailed(gLogicalDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(gFence.GetAddressOf())));
+        gFenceValue = 1;
 
         // Create an event handle to use for frame synchronization.
-        if (!s_FenceOperatingSystemEvent)
-            s_FenceOperatingSystemEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+        if (!gFenceOperatingSystemEvent)
+            gFenceOperatingSystemEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 
-        if (s_FenceOperatingSystemEvent == nullptr)
+        if (gFenceOperatingSystemEvent == nullptr)
             ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
 
         // Wait for the command list to execute; we are reusing the same command
@@ -791,19 +801,22 @@ void InitializeGraphicsRuntime()
         ImGuiIO& io = ImGui::GetIO();
 
         (void)io;
-        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
-        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;  // Enable Gamepad Controls
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+        // NOTE: Enabling this causes a 200+ ms hitch on the first NewFrame() call.
+        // Disable it for now to remove that hitch.
+        // io.ConfigFlags |= ImGuiConfigFlaggNavEnableGamepad;
 
         // Auto-install message callbacks.
-        ImGui_ImplGlfw_InitForOther(s_Window, true);
+        ImGui_ImplGlfw_InitForOther(gWindow, true);
 
-        auto srvHeapCPUHandle = s_SRVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-        auto srvHeapGPUHandle = s_SRVDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
+        auto srvHeapCPUHandle = gSRVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
+        auto srvHeapGPUHandle = gSRVDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
 
-        ImGui_ImplDX12_Init(s_LogicalDevice.Get(),
+        ImGui_ImplDX12_Init(gLogicalDevice.Get(),
                             DXGI_MAX_SWAP_CHAIN_BUFFERS,
                             DXGI_FORMAT_R8G8B8A8_UNORM,
-                            s_SRVDescriptorHeap.Get(),
+                            gSRVDescriptorHeap.Get(),
                             srvHeapCPUHandle,
                             srvHeapGPUHandle);
 
@@ -814,15 +827,15 @@ void InitializeGraphicsRuntime()
     // ------------------------------------------
 
     {
-        spdlog::info("Device: {}", s_DXGIAdapterNames[s_DXGIAdapterIndex]);
-        spdlog::info("VRAM:   {} GB", s_DXGIAdapterInfos[s_DXGIAdapterIndex].DedicatedVideoMemory / static_cast<float>(1024 * 1024 * 1024));
+        spdlog::info("Device: {}", gDXGIAdapterNames[gDXGIAdapterIndex]);
+        spdlog::info("VRAM:   {} GB", gDXGIAdapterInfos[gDXGIAdapterIndex].DedicatedVideoMemory / static_cast<float>(1024 * 1024 * 1024));
     }
 }
 
 void RenderInterface()
 {
     ImGui::SetNextWindowPos(ImVec2(0, 0));
-    ImGui::SetNextWindowSize(ImVec2((float)s_BackBufferSize.x * 0.25f, (float)s_BackBufferSize.y));
+    ImGui::SetNextWindowSize(ImVec2((float)gBackBufferSize.x * 0.25f, (float)gBackBufferSize.y));
     ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, FLT_MAX));
 
     ImGui::Begin("Settings", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize);
@@ -831,47 +844,48 @@ void RenderInterface()
 
     if (ImGui::CollapsingHeader("Presentation", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        StringListDropdown("Display", s_DXGIOutputNames, s_DXGIOutputsIndex);
+        StringListDropdown("Display", gDXGIOutputNames, gDXGIOutputsIndex);
 
-        ImGui::BeginDisabled(s_WindowMode != WindowMode::Windowed);
+        ImGui::BeginDisabled(gWindowMode != WindowMode::Windowed);
 
-        if (StringListDropdown("Resolution", s_DXGIDisplayResolutionsStr, s_DXGIDisplayResolutionsIndex))
-            s_UpdateFlags |= UpdateFlags::SwapChainResize;
-
-        ImGui::EndDisabled();
-
-        ImGui::BeginDisabled(s_WindowMode != WindowMode::ExclusiveFullscreen);
-
-        if (StringListDropdown("Refresh Rate", s_DXGIDisplayRefreshRatesStr, s_DXGIDisplayRefreshRatesIndex))
-            s_UpdateFlags |= UpdateFlags::SwapChainResize;
+        if (StringListDropdown("Resolution", gDXGIDisplayResolutionsStr, gDXGIDisplayResolutionsIndex))
+            gUpdateFlags |= UpdateFlags::SwapChainResize;
 
         ImGui::EndDisabled();
 
-        if (StringListDropdown("Adapter", s_DXGIAdapterNames, s_DXGIAdapterIndex))
-            s_UpdateFlags |= UpdateFlags::GraphicsRuntime;
+        ImGui::BeginDisabled(gWindowMode != WindowMode::ExclusiveFullscreen);
 
-        if (EnumDropdown<WindowMode>("Window Mode", reinterpret_cast<int*>(&s_WindowMode)))
-            s_UpdateFlags |= UpdateFlags::SwapChainResize;
+        if (StringListDropdown("Refresh Rate", gDXGIDisplayRefreshRatesStr, gDXGIDisplayRefreshRatesIndex))
+            gUpdateFlags |= UpdateFlags::SwapChainResize;
 
-        if (EnumDropdown<SwapEffect>("Swap Effect", reinterpret_cast<int*>(&s_DXGISwapEffect)))
-            s_UpdateFlags |= UpdateFlags::SwapChainRecreate;
+        ImGui::EndDisabled();
 
-        // TODO: Might be able to resize here?
-        if (ImGui::SliderInt("Buffering", reinterpret_cast<int*>(&s_SwapChainImageCount), 2, DXGI_MAX_SWAP_CHAIN_BUFFERS - 1))
-            s_UpdateFlags |= UpdateFlags::SwapChainRecreate;
+        if (StringListDropdown("Adapter", gDXGIAdapterNames, gDXGIAdapterIndex))
+            gUpdateFlags |= UpdateFlags::GraphicsRuntime;
 
-        ImGui::SliderInt("V-Sync Interval", &s_SyncInterval, 0, 4);
+        if (EnumDropdown<WindowMode>("Window Mode", reinterpret_cast<int*>(&gWindowMode)))
+            gUpdateFlags |= UpdateFlags::SwapChainResize;
 
-        static int s_FramesInFlightCount = 1;
-        ImGui::SliderInt("Frames in Flight", &s_FramesInFlightCount, 1, 16);
+        if (EnumDropdown<SwapEffect>("Swap Effect", reinterpret_cast<int*>(&gDXGISwapEffect)))
+            gUpdateFlags |= UpdateFlags::SwapChainRecreate;
+
+        ImGui::SliderInt("V-Sync Interval", &gSyncInterval, 0, 4);
+
+#if 0
+        if (ImGui::SliderInt("Buffering", reinterpret_cast<int*>(&gSwapChainImageCount), 2, DXGI_MAX_SWAP_CHAIN_BUFFERS - 1))
+            gUpdateFlags |= UpdateFlags::SwapChainRecreate;
+
+        static int gFramesInFlightCount = 1;
+        ImGui::SliderInt("Frames in Flight", &gFramesInFlightCount, 1, 16);
+#endif
     }
 
     if (ImGui::CollapsingHeader("Rendering", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        if (!s_DSRVariantDescs.empty())
-            StringListDropdown("DirectSR Algorithm", s_DSRVariantNames, s_DSRVariantIndex);
+        if (!gDSRVariantDescs.empty())
+            StringListDropdown("DirectSR Algorithm", gDSRVariantNames, gDSRVariantIndex);
         else
-            StringListDropdown("DirectSR Algorithm", { "None" }, s_DSRVariantIndex);
+            StringListDropdown("DirectSR Algorithm", { "None" }, gDSRVariantIndex);
     }
 
     if (ImGui::CollapsingHeader("Analysis", ImGuiTreeNodeFlags_DefaultOpen))
@@ -882,7 +896,7 @@ void RenderInterface()
     if (ImGui::CollapsingHeader("Performance", ImGuiTreeNodeFlags_DefaultOpen))
     {
         static float elapsedTime = 0;
-        elapsedTime += s_DeltaTime;
+        elapsedTime += gDeltaTime;
 
         constexpr std::array<const char*, 2> graphModes = { "Frame Time (Milliseconds)", "Frames-per-Second" };
 
@@ -893,19 +907,19 @@ void RenderInterface()
         {
             case 0:
             {
-                float deltaTimeMs = 1000.0f * s_DeltaTime;
-                s_DeltaTimeMovingAverage.AddValue(deltaTimeMs);
-                s_DeltaTimeBuffer.AddPoint(elapsedTime, deltaTimeMs);
-                s_DeltaTimeMovingAverageBuffer.AddPoint(elapsedTime, s_DeltaTimeMovingAverage.GetAverage());
+                float deltaTimeMs = 1000.0f * gDeltaTime;
+                gDeltaTimeMovingAverage.AddValue(deltaTimeMs);
+                gDeltaTimeBuffer.AddPoint(elapsedTime, deltaTimeMs);
+                gDeltaTimeMovingAverageBuffer.AddPoint(elapsedTime, gDeltaTimeMovingAverage.GetAverage());
                 break;
             }
 
             case 1:
             {
-                float framesPerSecond = 1.0f / s_DeltaTime;
-                s_DeltaTimeMovingAverage.AddValue(framesPerSecond);
-                s_DeltaTimeBuffer.AddPoint(elapsedTime, framesPerSecond);
-                s_DeltaTimeMovingAverageBuffer.AddPoint(elapsedTime, s_DeltaTimeMovingAverage.GetAverage());
+                float framesPerSecond = 1.0f / gDeltaTime;
+                gDeltaTimeMovingAverage.AddValue(framesPerSecond);
+                gDeltaTimeBuffer.AddPoint(elapsedTime, framesPerSecond);
+                gDeltaTimeMovingAverageBuffer.AddPoint(elapsedTime, gDeltaTimeMovingAverage.GetAverage());
                 break;
             }
         }
@@ -916,26 +930,26 @@ void RenderInterface()
         {
             ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, 0x0);
             ImPlot::SetupAxisLimits(ImAxis_X1, elapsedTime - history, elapsedTime, ImGuiCond_Always);
-            ImPlot::SetupAxisLimits(ImAxis_Y1, 0, s_DeltaTimeMovingAverage.GetAverage() * 2.0, ImGuiCond_Always);
+            ImPlot::SetupAxisLimits(ImAxis_Y1, 0, gDeltaTimeMovingAverage.GetAverage() * 2.0, ImGuiCond_Always);
 
             ImPlot::SetNextLineStyle(IMPLOT_AUTO_COL, 1.0);
 
             ImPlot::PlotLine("Exact",
-                             &s_DeltaTimeBuffer.mData[0].x,
-                             &s_DeltaTimeBuffer.mData[0].y,
-                             s_DeltaTimeBuffer.mData.size(),
+                             &gDeltaTimeBuffer.mData[0].x,
+                             &gDeltaTimeBuffer.mData[0].y,
+                             gDeltaTimeBuffer.mData.size(),
                              ImPlotLineFlags_None,
-                             s_DeltaTimeBuffer.mOffset,
+                             gDeltaTimeBuffer.mOffset,
                              2 * sizeof(float));
 
             ImPlot::SetNextLineStyle(IMPLOT_AUTO_COL, 2.0);
 
             ImPlot::PlotLine("Smoothed",
-                             &s_DeltaTimeMovingAverageBuffer.mData[0].x,
-                             &s_DeltaTimeMovingAverageBuffer.mData[0].y,
-                             s_DeltaTimeMovingAverageBuffer.mData.size(),
+                             &gDeltaTimeMovingAverageBuffer.mData[0].x,
+                             &gDeltaTimeMovingAverageBuffer.mData[0].y,
+                             gDeltaTimeMovingAverageBuffer.mData.size(),
                              ImPlotLineFlags_None,
-                             s_DeltaTimeMovingAverageBuffer.mOffset,
+                             gDeltaTimeMovingAverageBuffer.mOffset,
                              2 * sizeof(float));
 
             ImPlot::EndPlot();
@@ -949,7 +963,7 @@ void RenderInterface()
 
         if (ImGui::BeginChild("##LogChild", ImVec2(0, 200), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar))
         {
-            ImGui::TextUnformatted(s_LoggerMemory->str().c_str());
+            ImGui::TextUnformatted(gLoggerMemory->str().c_str());
 
             if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
                 ImGui::SetScrollHereY(1.0F);
@@ -963,26 +977,28 @@ void RenderInterface()
 
     ImGui::End();
 
-    ImGui::SetNextWindowPos(ImVec2((float)s_BackBufferSize.x * 0.25f, 0.0f));
-    ImGui::SetNextWindowSize(ImVec2((float)s_BackBufferSize.x * 0.75f, (float)s_BackBufferSize.y));
+#if 0
+    ImGui::SetNextWindowPos(ImVec2((float)gBackBufferSize.x * 0.25f, 0.0f));
+    ImGui::SetNextWindowSize(ImVec2((float)gBackBufferSize.x * 0.75f, (float)gBackBufferSize.y));
     ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, FLT_MAX));
 
-    ImGui::Begin("Viewport", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
+    ImGui::Begin("Viewport", nullptr, ImGuiWindowFlaggNoMove | ImGuiWindowFlaggNoCollapse);
 
     ImGui::End();
+#endif
 }
 
 void SyncSettings()
 {
-    if ((s_UpdateFlags & UpdateFlags::GraphicsRuntime) != 0)
+    if ((gUpdateFlags & UpdateFlags::GraphicsRuntime) != 0)
     {
-        if (s_WindowMode == WindowMode::ExclusiveFullscreen)
+        if (gWindowMode == WindowMode::ExclusiveFullscreen)
         {
             spdlog::info(
                 "Detected adapter change while in exclusive fullscreen mode.\nForcing the app into borderless fullscreen mode in case the new "
                 "adapter does not have ownership of the display.");
 
-            s_WindowMode = WindowMode::BorderlessFullscreen;
+            gWindowMode = WindowMode::BorderlessFullscreen;
 
             UpdateWindowAndUpdateSwapChain();
         }
@@ -996,7 +1012,7 @@ void SyncSettings()
         InitializeGraphicsRuntime();
     }
 
-    if ((s_UpdateFlags & UpdateFlags::SwapChainRecreate) != 0)
+    if ((gUpdateFlags & UpdateFlags::SwapChainRecreate) != 0)
     {
         WaitForDevice();
 
@@ -1007,7 +1023,7 @@ void SyncSettings()
         CreateSwapChain();
     }
 
-    if ((s_UpdateFlags & UpdateFlags::SwapChainResize) != 0)
+    if ((gUpdateFlags & UpdateFlags::SwapChainResize) != 0)
     {
         WaitForDevice();
 
@@ -1015,74 +1031,74 @@ void SyncSettings()
     }
 
     // Clear update flags.
-    s_UpdateFlags = 0u;
+    gUpdateFlags = 0u;
 }
 
 void Render()
 {
     SyncSettings();
 
-    s_StopWatch.Read(s_DeltaTime);
+    gStopWatch.Read(gDeltaTime);
 
-    ThrowIfFailed(s_CommandAllocator->Reset());
+    ThrowIfFailed(gCommandAllocator->Reset());
 
-    ThrowIfFailed(s_CommandList->Reset(s_CommandAllocator.Get(), nullptr));
+    ThrowIfFailed(gCommandList->Reset(gCommandAllocator.Get(), nullptr));
 
     ImGui_ImplDX12_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
-    auto presentToRenderBarrier = CD3DX12_RESOURCE_BARRIER::Transition(s_SwapChainImages[s_CurrentSwapChainImageIndex].Get(),
+    auto presentToRenderBarrier = CD3DX12_RESOURCE_BARRIER::Transition(gSwapChainImages[gCurrentSwapChainImageIndex].Get(),
                                                                        D3D12_RESOURCE_STATE_PRESENT,
                                                                        D3D12_RESOURCE_STATE_RENDER_TARGET);
-    s_CommandList->ResourceBarrier(1, &presentToRenderBarrier);
+    gCommandList->ResourceBarrier(1, &presentToRenderBarrier);
 
-    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(s_RTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
-                                            s_CurrentSwapChainImageIndex,
-                                            s_RTVDescriptorSize);
-    s_CommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(gRTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+                                            gCurrentSwapChainImageIndex,
+                                            gRTVDescriptorSize);
+    gCommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
     // Clear the overlay ui region.
     {
         const float clearColor[]   = { 1.0f, 1.0f, 1.0f, 1.0f };
-        D3D12_RECT  clearColorRect = { 0, 0, static_cast<LONG>(0.25L * s_BackBufferSize.x), s_BackBufferSize.y };
-        s_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 1, &clearColorRect);
+        D3D12_RECT  clearColorRect = { 0, 0, static_cast<LONG>(0.25L * gBackBufferSize.x), gBackBufferSize.y };
+        gCommandList->ClearRenderTargetView(rtvHandle, clearColor, 1, &clearColorRect);
     }
 
     // CLear the normal rendering viewport region.
     {
         const float clearColor[]   = { 0.2f, 0.2f, 0.75f, 1.0f };
-        D3D12_RECT  clearColorRect = { static_cast<LONG>(0.25L * s_BackBufferSize.x), 0, s_BackBufferSize.x, s_BackBufferSize.y };
-        s_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 1, &clearColorRect);
+        D3D12_RECT  clearColorRect = { static_cast<LONG>(0.25L * gBackBufferSize.x), 0, gBackBufferSize.x, gBackBufferSize.y };
+        gCommandList->ClearRenderTargetView(rtvHandle, clearColor, 1, &clearColorRect);
     }
 
     RenderInterface();
     ImGui::Render();
 
-    s_CommandList->SetDescriptorHeaps(1, s_SRVDescriptorHeap.GetAddressOf());
-    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), s_CommandList.Get());
+    gCommandList->SetDescriptorHeaps(1, gSRVDescriptorHeap.GetAddressOf());
+    ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), gCommandList.Get());
 
-    auto renderToPresentBarrier = CD3DX12_RESOURCE_BARRIER::Transition(s_SwapChainImages[s_CurrentSwapChainImageIndex].Get(),
+    auto renderToPresentBarrier = CD3DX12_RESOURCE_BARRIER::Transition(gSwapChainImages[gCurrentSwapChainImageIndex].Get(),
                                                                        D3D12_RESOURCE_STATE_RENDER_TARGET,
                                                                        D3D12_RESOURCE_STATE_PRESENT);
-    s_CommandList->ResourceBarrier(1, &renderToPresentBarrier);
+    gCommandList->ResourceBarrier(1, &renderToPresentBarrier);
 
-    ThrowIfFailed(s_CommandList->Close());
+    ThrowIfFailed(gCommandList->Close());
 
-    ID3D12CommandList* ppCommandLists[] = { s_CommandList.Get() };
-    s_CommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+    ID3D12CommandList* ppCommandLists[] = { gCommandList.Get() };
+    gCommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
     // Present the frame.
-    ThrowIfFailed(s_DXGISwapChain->Present(s_SyncInterval, 0));
+    ThrowIfFailed(gDXGISwapChain->Present(gSyncInterval, 0));
 
     WaitForDevice();
 }
 
 inline std::string HrToString(HRESULT hr)
 {
-    char s_str[64] = {};
-    sprintf_s(s_str, "HRESULT of 0x%08X", static_cast<UINT>(hr));
-    return std::string(s_str);
+    char gstr[64] = {};
+    sprintf_s(gstr, "HRESULT of 0x%08X", static_cast<UINT>(hr));
+    return std::string(gstr);
 }
 
 class HrException : public std::runtime_error
@@ -1107,13 +1123,13 @@ void ThrowIfFailed(HRESULT hr)
 
 void WaitForDevice()
 {
-    ThrowIfFailed(s_CommandQueue->Signal(s_Fence.Get(), s_FenceValue));
+    ThrowIfFailed(gCommandQueue->Signal(gFence.Get(), gFenceValue));
 
     // Wait until the previous frame is finished.
-    ThrowIfFailed(s_Fence->SetEventOnCompletion(s_FenceValue, s_FenceOperatingSystemEvent));
-    WaitForSingleObject(s_FenceOperatingSystemEvent, INFINITE);
+    ThrowIfFailed(gFence->SetEventOnCompletion(gFenceValue, gFenceOperatingSystemEvent));
+    WaitForSingleObject(gFenceOperatingSystemEvent, INFINITE);
 
-    s_FenceValue++;
+    gFenceValue++;
 
-    s_CurrentSwapChainImageIndex = s_DXGISwapChain->GetCurrentBackBufferIndex();
+    gCurrentSwapChainImageIndex = gDXGISwapChain->GetCurrentBackBufferIndex();
 }

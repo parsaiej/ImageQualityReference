@@ -6,6 +6,7 @@
       "joltphysics",
       "magic-enum",
       "stb",
-      "glfw3"
+      "glfw3",
+      "tbb"
     ]
   }

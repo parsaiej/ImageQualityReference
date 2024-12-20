@@ -29,6 +29,8 @@
 
 #include <stb_image.h>
 
+#include <tbb/tbb.h>
+
 #include <Windows.h>
 #include <format>
 #include <set>

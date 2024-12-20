@@ -29,6 +29,7 @@ find_package(imgui           CONFIG REQUIRED)
 find_package(implot          CONFIG REQUIRED)
 find_package(magic_enum      CONFIG REQUIRED)
 find_package(glfw3           CONFIG REQUIRED)
+find_package(TBB             CONFIG REQUIRED)   
 find_package(Stb                    REQUIRED)
 
 # Executable
@@ -66,6 +67,7 @@ target_link_libraries(ImageQualityReference PRIVATE
     dxgi
     d3d12
     glfw
+    TBB::tbb
     imgui::imgui
     implot::implot
     magic_enum::magic_enum
