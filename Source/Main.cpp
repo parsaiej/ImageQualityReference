@@ -39,6 +39,9 @@ enum UpdateFlags : uint32_t
 // State
 // -----------------------------
 
+// Report unreleased objects when this goes out of scope (after ComPtr).
+D3DMemoryLeakReport gLeakReport;
+
 HINSTANCE   gInstance     = nullptr;
 GLFWwindow* gWindow       = nullptr;
 HWND        gWindowNative = nullptr;
@@ -70,14 +73,14 @@ HANDLE              gFenceOperatingSystemEvent = nullptr;
 UINT64              gFenceValue                = 0U;
 
 // Process -> Adapter -> Display (DXGI)
-ComPtr<IDXGIAdapter1>           gDXGIAdapter;
-ComPtr<IDXGIFactory6>           gDXGIFactory;
-ComPtr<IDXGISwapChain3>         gDXGISwapChain;
-std::vector<DXGI_ADAPTER_DESC1> gDXGIAdapterInfos;
-SwapEffect                      gDXGISwapEffect;
-std::vector<IDXGIOutput*>       gDXGIOutputs;
-std::vector<std::string>        gDXGIOutputNames;
-std::vector<DXGI_MODE_DESC>     gDXGIDisplayModes;
+ComPtr<IDXGIAdapter1>            gDXGIAdapter;
+ComPtr<IDXGIFactory6>            gDXGIFactory;
+ComPtr<IDXGISwapChain3>          gDXGISwapChain;
+std::vector<DXGI_ADAPTER_DESC1>  gDXGIAdapterInfos;
+SwapEffect                       gDXGISwapEffect;
+std::vector<ComPtr<IDXGIOutput>> gDXGIOutputs;
+std::vector<std::string>         gDXGIOutputNames;
+std::vector<DXGI_MODE_DESC>      gDXGIDisplayModes;
 
 std::vector<DirectX::XMINT2> gDXGIDisplayResolutions;
 std::vector<std::string>     gDXGIDisplayResolutionsStr;
@@ -139,9 +142,6 @@ void CreateOperatingSystemWindow();
 // Enumerate a list of graphics adapters that support our usage of D3D12.
 void EnumerateSupportedAdapters();
 
-// Release all D3D12 resources.
-void ReleaseGraphicsRuntime();
-
 // Create a DXGI swap-chain for the OS window.
 void InitializeGraphicsRuntime();
 
@@ -198,7 +198,9 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
     {
         glfwInit();
 
-        gWindow = glfwCreateWindow(gBackBufferSize.x, gBackBufferSize.y, "ImageClarityReference", nullptr, nullptr);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+
+        gWindow = glfwCreateWindow(gBackBufferSize.x, gBackBufferSize.y, "Image Clarity Reference", nullptr, nullptr);
 
         if (!gWindow)
             exit(1);
@@ -217,10 +219,10 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
         // Select a resolution size from the list, around the half-largest one.
         gDXGIDisplayResolutionsIndex = static_cast<int>(gDXGIDisplayResolutions.size()) / 2;
 
+        gBackBufferSize = gDXGIDisplayResolutions[gDXGIDisplayResolutionsIndex];
+
         // Select the largest refresh rate.
         gDXGIDisplayRefreshRatesIndex = static_cast<int>(gDXGIDisplayRefreshRates.size()) - 1;
-
-        gBackBufferSize = gDXGIDisplayResolutions[gDXGIDisplayResolutionsIndex];
 
         // Queue a resize on the next render call.
         gUpdateFlags |= UpdateFlags::SwapChainResize;
@@ -233,12 +235,12 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
         Render();
     }
 
-    ReleaseGraphicsRuntime();
-
-    for (auto& pOutput : gDXGIOutputs)
+    // Shut down imgui.
     {
-        if (pOutput)
-            pOutput->Release();
+        ImGui_ImplDX12_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+        ImPlot::DestroyContext();
+        ImGui::DestroyContext();
     }
 
     return 0;
@@ -331,6 +333,8 @@ void EnumerateSupportedAdapters()
         gDXGIAdapterInfos.push_back(desc);
     }
 
+    SetDebugName(pDXGIFactory.Get(), L"Temporary Enumeration Adapter");
+
     // Extract a list of supported adapter names for presentation to the user.
     std::transform(gDXGIAdapterInfos.begin(),
                    gDXGIAdapterInfos.end(),
@@ -367,8 +371,7 @@ void CreateSwapChain()
     }
 
     ComPtr<IDXGISwapChain1> swapChain;
-    ThrowIfFailed(
-        gDXGIFactory->CreateSwapChainForHwnd(gCommandQueue.Get(), gWindowNative, &swapChainDesc, nullptr, nullptr, swapChain.GetAddressOf()));
+    ThrowIfFailed(gDXGIFactory->CreateSwapChainForHwnd(gCommandQueue.Get(), gWindowNative, &swapChainDesc, nullptr, nullptr, &swapChain));
 
     // Does not support fullscreen transitions.
     ThrowIfFailed(gDXGIFactory->MakeWindowAssociation(gWindowNative, DXGI_MWA_NO_ALT_ENTER));
@@ -406,7 +409,7 @@ DirectX::XMINT2 gPreviousWindowedPos;
 DirectX::XMINT2 gPreviousWindowedSize;
 int             gDXGIDisplayResolutionsIndexPrev;
 
-void UpdateWindowAndUpdateSwapChain()
+void UpdateWindowAndSwapChain()
 {
     switch (gWindowMode)
     {
@@ -450,7 +453,7 @@ void UpdateWindowAndUpdateSwapChain()
             {
                 spdlog::info("Failed to go fullscreen. The adapter may not own the output display. Reverting to borderless.");
                 gWindowMode = WindowMode::BorderlessFullscreen;
-                UpdateWindowAndUpdateSwapChain();
+                UpdateWindowAndSwapChain();
                 return;
             }
 
@@ -541,28 +544,6 @@ void UpdateWindowAndUpdateSwapChain()
     gWindowModePrev     = gWindowMode;
 }
 
-void ReleaseGraphicsRuntime()
-{
-    ImGui_ImplDX12_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImPlot::DestroyContext();
-    ImGui::DestroyContext();
-
-    gDSRDevice.Reset();
-    gCommandAllocator->Reset();
-    gCommandList.Reset();
-    gCommandQueue.Reset();
-    gSRVDescriptorHeap.Reset();
-    gRTVDescriptorHeap.Reset();
-    gFence.Reset();
-
-    ReleaseSwapChain();
-
-    gDXGIAdapter.Reset();
-    gDXGIFactory.Reset();
-    gLogicalDevice.Reset();
-}
-
 void EnumerateOutputDisplays()
 {
     // NOTE: Some systems (i.e. laptops with dedicate GPU) fail to enumrate any outputs
@@ -570,10 +551,7 @@ void EnumerateOutputDisplays()
     //       Thus, we enumerate all adapters first and check each output that adapter owns.
 
     for (auto& pOutput : gDXGIOutputs)
-    {
-        if (pOutput)
-            pOutput->Release();
-    }
+        pOutput.Reset();
 
     gDXGIOutputs.clear();
     gDXGIOutputNames.clear();
@@ -587,7 +565,11 @@ void EnumerateOutputDisplays()
         UINT         outputIndex = 0u;
 
         while (pAdapter->EnumOutputs(outputIndex++, &pOutput) != DXGI_ERROR_NOT_FOUND)
+        {
             gDXGIOutputs.push_back(pOutput);
+
+            pOutput->Release();
+        }
 
         pAdapter->Release();
     }
@@ -596,7 +578,7 @@ void EnumerateOutputDisplays()
     std::transform(gDXGIOutputs.begin(),
                    gDXGIOutputs.end(),
                    std::back_inserter(gDXGIOutputNames),
-                   [](IDXGIOutput* pOutput)
+                   [](const ComPtr<IDXGIOutput>& pOutput)
                    {
                        DXGI_OUTPUT_DESC outputInfo;
                        pOutput->GetDesc(&outputInfo);
@@ -628,6 +610,7 @@ void EnumerateDisplayModes()
         gDXGIDisplayResolutions.resize(uniqueDisplayModeResolutions.size());
         std::copy(uniqueDisplayModeResolutions.begin(), uniqueDisplayModeResolutions.end(), gDXGIDisplayResolutions.begin());
 
+        gDXGIDisplayResolutionsStr.clear();
         std::transform(gDXGIDisplayResolutions.begin(),
                        gDXGIDisplayResolutions.end(),
                        std::back_inserter(gDXGIDisplayResolutionsStr),
@@ -647,6 +630,7 @@ void EnumerateDisplayModes()
         gDXGIDisplayRefreshRates.resize(uniqueRefreshRates.size());
         std::copy(uniqueRefreshRates.begin(), uniqueRefreshRates.end(), gDXGIDisplayRefreshRates.begin());
 
+        gDXGIDisplayRefreshRatesStr.clear();
         std::transform(gDXGIDisplayRefreshRates.begin(),
                        gDXGIDisplayRefreshRates.end(),
                        std::back_inserter(gDXGIDisplayRefreshRatesStr),
@@ -665,7 +649,7 @@ void InitializeGraphicsRuntime()
     // DXGI Adapter Selection
     // ------------------------------------------
 
-    ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(gDXGIFactory.GetAddressOf())));
+    ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&gDXGIFactory)));
 
     ComPtr<IDXGIAdapter1> pAdapter;
     for (UINT adapterIndex = 0; SUCCEEDED(gDXGIFactory->EnumAdapters1(adapterIndex, &pAdapter)); ++adapterIndex)
@@ -677,7 +661,11 @@ void InitializeGraphicsRuntime()
             break;
     }
 
-    gDXGIAdapter = pAdapter.Detach();
+    pAdapter.As(&gDXGIAdapter);
+
+    SetDebugName(
+        gDXGIAdapter.Get(),
+        std::format(L"Adapter {}", std::wstring(gDXGIAdapterNames[gDXGIAdapterIndex].begin(), gDXGIAdapterNames[gDXGIAdapterIndex].end())).c_str());
 
     EnumerateOutputDisplays();
 
@@ -693,13 +681,13 @@ void InitializeGraphicsRuntime()
     }
 #endif
 
-    ThrowIfFailed(D3D12CreateDevice(gDXGIAdapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(gLogicalDevice.GetAddressOf())));
+    ThrowIfFailed(D3D12CreateDevice(gDXGIAdapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&gLogicalDevice)));
 
     // Describe and create the command queue.
     D3D12_COMMAND_QUEUE_DESC queueDesc = {};
     queueDesc.Flags                    = D3D12_COMMAND_QUEUE_FLAG_NONE;
     queueDesc.Type                     = D3D12_COMMAND_LIST_TYPE_DIRECT;
-    ThrowIfFailed(gLogicalDevice->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(gCommandQueue.GetAddressOf())));
+    ThrowIfFailed(gLogicalDevice->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&gCommandQueue)));
 
     // Descriptor heaps.
     // ------------------------------------------
@@ -709,13 +697,13 @@ void InitializeGraphicsRuntime()
         rtvHeapDesc.NumDescriptors             = 32;
         rtvHeapDesc.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
         rtvHeapDesc.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-        ThrowIfFailed(gLogicalDevice->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(gRTVDescriptorHeap.GetAddressOf())));
+        ThrowIfFailed(gLogicalDevice->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&gRTVDescriptorHeap)));
 
         D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
         srvHeapDesc.NumDescriptors             = 32;
         srvHeapDesc.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
         srvHeapDesc.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-        ThrowIfFailed(gLogicalDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(gSRVDescriptorHeap.GetAddressOf())));
+        ThrowIfFailed(gLogicalDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&gSRVDescriptorHeap)));
 
         gRTVDescriptorSize = gLogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
         gSRVDescriptorSize = gLogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -723,11 +711,16 @@ void InitializeGraphicsRuntime()
 
     // ------------------------------------------
 
+    if (gDXGISwapChain)
+        ReleaseSwapChain();
+
     CreateSwapChain();
 
     // ------------------------------------------
 
-    ThrowIfFailed(gLogicalDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(gCommandAllocator.GetAddressOf())));
+    ThrowIfFailed(gLogicalDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&gCommandAllocator)));
+
+    SetDebugName(gCommandAllocator.Get(), L"Command Allocator");
 
     // Initialize DirectSR device.
     // ------------------------------------------
@@ -738,7 +731,7 @@ void InitializeGraphicsRuntime()
         if (FAILED(D3D12GetInterface(CLSID_D3D12DSRDeviceFactory, IID_PPV_ARGS(&pDSRDeviceFactory))))
             break;
 
-        if (FAILED(pDSRDeviceFactory->CreateDSRDevice(gLogicalDevice.Get(), 1, IID_PPV_ARGS(gDSRDevice.GetAddressOf()))))
+        if (FAILED(pDSRDeviceFactory->CreateDSRDevice(gLogicalDevice.Get(), 1, IID_PPV_ARGS(&gDSRDevice))))
             break;
 
         gDSRVariantDescs.resize(gDSRDevice->GetNumSuperResVariants());
@@ -762,11 +755,8 @@ void InitializeGraphicsRuntime()
     }
     while (false);
 
-    ThrowIfFailed(gLogicalDevice->CreateCommandList(0,
-                                                    D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                                    gCommandAllocator.Get(),
-                                                    nullptr,
-                                                    IID_PPV_ARGS(gCommandList.GetAddressOf())));
+    ThrowIfFailed(
+        gLogicalDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, gCommandAllocator.Get(), nullptr, IID_PPV_ARGS(&gCommandList)));
 
     ThrowIfFailed(gCommandList->Close());
 
@@ -774,7 +764,7 @@ void InitializeGraphicsRuntime()
     // ------------------------------------------
 
     {
-        ThrowIfFailed(gLogicalDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(gFence.GetAddressOf())));
+        ThrowIfFailed(gLogicalDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&gFence)));
         gFenceValue = 1;
 
         // Create an event handle to use for frame synchronization.
@@ -794,6 +784,14 @@ void InitializeGraphicsRuntime()
     // ------------------------------------------
 
     {
+        if (ImGui::GetCurrentContext() != nullptr)
+        {
+            ImGui_ImplDX12_Shutdown();
+            ImGui_ImplGlfw_Shutdown();
+            ImPlot::DestroyContext();
+            ImGui::DestroyContext();
+        }
+
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         ImPlot::CreateContext();
@@ -1000,14 +998,12 @@ void SyncSettings()
 
             gWindowMode = WindowMode::BorderlessFullscreen;
 
-            UpdateWindowAndUpdateSwapChain();
+            UpdateWindowAndSwapChain();
         }
 
         WaitForDevice();
 
         spdlog::info("Updating Graphics Adapter");
-
-        ReleaseGraphicsRuntime();
 
         InitializeGraphicsRuntime();
     }
@@ -1027,7 +1023,7 @@ void SyncSettings()
     {
         WaitForDevice();
 
-        UpdateWindowAndUpdateSwapChain();
+        UpdateWindowAndSwapChain();
     }
 
     // Clear update flags.
