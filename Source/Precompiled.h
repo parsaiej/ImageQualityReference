@@ -15,10 +15,13 @@
 #include <wrl.h>
 
 #include <imgui.h>
-#include <imgui_impl_win32.h>
+#include <imgui_impl_glfw.h>
 #include <imgui_impl_dx12.h>
 
 #include <GLFW/glfw3.h>
+
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
 
 #include <implot.h>
 

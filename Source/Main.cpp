@@ -35,8 +35,9 @@ enum UpdateFlags : uint32_t
 // State
 // -----------------------------
 
-HINSTANCE s_Instance = nullptr;
-HWND      s_Window   = nullptr;
+HINSTANCE   s_Instance     = nullptr;
+GLFWwindow* s_Window       = nullptr;
+HWND        s_WindowNative = nullptr;
 
 WindowMode s_WindowMode     = WindowMode::Windowed;
 WindowMode s_WindowModePrev = WindowMode::Windowed;
@@ -103,12 +104,9 @@ int s_SyncInterval;
 // Current update flags for the frame.
 uint32_t s_UpdateFlags;
 
-// Internal (pre-upscaled) viewport resolution.
-DirectX::XMINT2 s_ViewportSizeInternal { 1920, 1080 };
-
 // Output (post-upscaled) viewport resolution.
-DirectX::XMINT2 s_ViewportSizeOutput { s_ViewportSizeInternal };
-DirectX::XMINT2 s_ViewportSizeOutputPrev { -1, -1 };
+DirectX::XMINT2 s_BackBufferSize { 1280, 720 };
+DirectX::XMINT2 s_BackBufferSizePrev { 1280, 720 };
 
 // Cached window rect if going from fullscreen -> window.
 RECT s_WindowRect;
@@ -124,8 +122,6 @@ std::string FromWideStr(std::wstring str);
 void CreateSwapChain();
 
 void ReleaseSwapChain();
-
-void ResizeSwapChain();
 
 // Creates an OS window for Microsoft Windows.
 void CreateOperatingSystemWindow();
@@ -186,21 +182,38 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
 
     EnumerateSupportedAdapters();
 
-    CreateOperatingSystemWindow();
+    // Create operating system window.
+    // -----------------------------------------
+    {
+        glfwInit();
+
+        s_Window = glfwCreateWindow(s_BackBufferSize.x, s_BackBufferSize.y, "ImageClarityReference", nullptr, nullptr);
+
+        if (!s_Window)
+            exit(1);
+
+        s_WindowNative = glfwGetWin32Window(s_Window);
+    }
 
     InitializeGraphicsRuntime();
 
-    ShowWindow(s_Window, nCmdShow);
-
-    MSG msg = {};
-    while (msg.message != WM_QUIT)
+    // Configure initial window size based on display-supplied resolutions.
+    // -----------------------------------------
     {
-        // Process any messages in the queue.
-        if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
-        {
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
+        // Select a resolution size from the list, around the half-largest one.
+        s_DXGIDisplayResolutionsIndex = static_cast<int>(s_DXGIDisplayResolutions.size()) / 2;
+
+        s_BackBufferSize = s_DXGIDisplayResolutions[s_DXGIDisplayResolutionsIndex];
+
+        // Queue a resize on the next render call.
+        s_UpdateFlags |= UpdateFlags::SwapChainResize;
+    }
+
+    while (!glfwWindowShouldClose(s_Window))
+    {
+        glfwPollEvents();
+
+        Render();
     }
 
     ReleaseGraphicsRuntime();
@@ -211,11 +224,8 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
             pOutput->Release();
     }
 
-    // Return this part of the WM_QUIT message to Windows.
-    return static_cast<char>(msg.wParam);
+    return 0;
 }
-
-inline UpdateFlags operator|(UpdateFlags a, UpdateFlags b) { return static_cast<UpdateFlags>(static_cast<int>(a) | static_cast<int>(b)); }
 
 std::string FromWideStr(std::wstring wstr)
 {
@@ -322,41 +332,12 @@ void EnumerateSupportedAdapters()
     exit(1);
 }
 
-void CreateOperatingSystemWindow()
-{
-    WNDCLASSEX windowClass = { 0 };
-    {
-        windowClass.cbSize        = sizeof(WNDCLASSEX);
-        windowClass.style         = CS_HREDRAW | CS_VREDRAW;
-        windowClass.lpfnWndProc   = WindowProc;
-        windowClass.hInstance     = s_Instance;
-        windowClass.hCursor       = LoadCursor(NULL, IDC_ARROW);
-        windowClass.lpszClassName = "ImageClarityReference";
-    }
-    RegisterClassEx(&windowClass);
-
-    RECT windowRect = { 0, 0, s_ViewportSizeOutput.x, s_ViewportSizeOutput.y };
-    AdjustWindowRect(&windowRect, s_WindowStyle, FALSE);
-
-    s_Window = CreateWindow(windowClass.lpszClassName,
-                            "Image Clarity Reference",
-                            s_WindowStyle,
-                            CW_USEDEFAULT,
-                            CW_USEDEFAULT,
-                            windowRect.right - windowRect.left,
-                            windowRect.bottom - windowRect.top,
-                            nullptr,
-                            nullptr,
-                            s_Instance,
-                            nullptr);
-}
-
 void CreateSwapChain()
 {
     DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
     swapChainDesc.BufferCount           = s_SwapChainImageCount;
-    swapChainDesc.Width                 = static_cast<UINT>(s_ViewportSizeOutput.x);
-    swapChainDesc.Height                = static_cast<UINT>(s_ViewportSizeOutput.y);
+    swapChainDesc.Width                 = static_cast<UINT>(s_BackBufferSize.x);
+    swapChainDesc.Height                = static_cast<UINT>(s_BackBufferSize.y);
     swapChainDesc.Format                = DXGI_FORMAT_R8G8B8A8_UNORM;
     swapChainDesc.BufferUsage           = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     swapChainDesc.SampleDesc.Count      = 1;
@@ -369,10 +350,11 @@ void CreateSwapChain()
     }
 
     ComPtr<IDXGISwapChain1> swapChain;
-    ThrowIfFailed(s_DXGIFactory->CreateSwapChainForHwnd(s_CommandQueue.Get(), s_Window, &swapChainDesc, nullptr, nullptr, swapChain.GetAddressOf()));
+    ThrowIfFailed(
+        s_DXGIFactory->CreateSwapChainForHwnd(s_CommandQueue.Get(), s_WindowNative, &swapChainDesc, nullptr, nullptr, swapChain.GetAddressOf()));
 
     // Does not support fullscreen transitions.
-    ThrowIfFailed(s_DXGIFactory->MakeWindowAssociation(s_Window, DXGI_MWA_NO_ALT_ENTER));
+    ThrowIfFailed(s_DXGIFactory->MakeWindowAssociation(s_WindowNative, DXGI_MWA_NO_ALT_ENTER));
 
     ThrowIfFailed(swapChain.As(&s_DXGISwapChain));
     s_CurrentSwapChainImageIndex = s_DXGISwapChain->GetCurrentBackBufferIndex();
@@ -403,10 +385,107 @@ void ReleaseSwapChain()
     s_DXGISwapChain.Reset();
 }
 
-void ResizeSwapChain()
+DirectX::XMINT2 s_PreviousWindowedPos;
+DirectX::XMINT2 s_PreviousWindowedSize;
+int             s_DXGIDisplayResolutionsIndexPrev;
+
+void UpdateWindowAndUpdateSwapChain()
 {
-    if (s_ViewportSizeOutput.x == s_ViewportSizeOutputPrev.x && s_ViewportSizeOutput.y == s_ViewportSizeOutputPrev.y)
-        return;
+    switch (s_WindowMode)
+    {
+        case WindowMode::BorderlessFullscreen:
+        case WindowMode::ExclusiveFullscreen:
+        {
+            if (s_WindowModePrev != WindowMode::Windowed)
+                break;
+
+            // Cache the windowed window if making fullscreen transition.
+            s_DXGIDisplayResolutionsIndexPrev = s_DXGIDisplayResolutionsIndex;
+            glfwGetWindowPos(s_Window, &s_PreviousWindowedPos.x, &s_PreviousWindowedPos.y);
+            glfwGetWindowSize(s_Window, &s_PreviousWindowedSize.x, &s_PreviousWindowedSize.y);
+        }
+
+        default: break;
+    }
+
+    // Handle DXGI / GLFW changes.
+    switch (s_WindowMode)
+    {
+        case WindowMode::Windowed:
+        {
+            ThrowIfFailed(s_DXGISwapChain->SetFullscreenState(false, nullptr));
+            glfwSetWindowSize(s_Window, s_BackBufferSize.x, s_BackBufferSize.y);
+            glfwSetWindowAttrib(s_Window, GLFW_DECORATED, GLFW_TRUE);
+            break;
+        }
+
+        case WindowMode::BorderlessFullscreen:
+        {
+            ThrowIfFailed(s_DXGISwapChain->SetFullscreenState(false, nullptr));
+            glfwSetWindowAttrib(s_Window, GLFW_DECORATED, GLFW_FALSE);
+            glfwSetWindowMonitor(s_Window, nullptr, 0, 0, s_BackBufferSize.x, s_BackBufferSize.y, 0);
+            break;
+        }
+
+        case WindowMode::ExclusiveFullscreen:
+        {
+            if (FAILED(s_DXGISwapChain->SetFullscreenState(true, nullptr)))
+            {
+                spdlog::info("Failed to go fullscreen. The adapter may not own the output display. Reverting to borderless.");
+                s_WindowMode = WindowMode::BorderlessFullscreen;
+                UpdateWindowAndUpdateSwapChain();
+                return;
+            }
+
+            break;
+        };
+    }
+
+    // Handle backbuffer sizes.
+    switch (s_WindowMode)
+    {
+        case WindowMode::Windowed:
+        {
+            if (s_WindowModePrev != WindowMode::Windowed)
+            {
+                s_DXGIDisplayResolutionsIndex = s_DXGIDisplayResolutionsIndexPrev;
+
+                // Restore cached window if making fullscreen transition.
+                glfwSetWindowMonitor(s_Window,
+                                     nullptr,
+                                     s_PreviousWindowedPos.x,
+                                     s_PreviousWindowedPos.y,
+                                     s_PreviousWindowedSize.x,
+                                     s_PreviousWindowedSize.y,
+                                     0);
+            }
+
+            s_BackBufferSize = s_DXGIDisplayResolutions[s_DXGIDisplayResolutionsIndex];
+            break;
+        }
+
+        case WindowMode::BorderlessFullscreen:
+        case WindowMode::ExclusiveFullscreen:
+        {
+            s_DXGIDisplayResolutionsIndex = static_cast<int>(s_DXGIDisplayResolutions.size()) - 1;
+            s_BackBufferSize              = s_DXGIDisplayResolutions[s_DXGIDisplayResolutionsIndex];
+            break;
+        }
+    }
+
+    spdlog::info("Resizing Swap Chain ({}x{} --> {}x{})", s_BackBufferSizePrev.x, s_BackBufferSizePrev.y, s_BackBufferSize.x, s_BackBufferSize.y);
+
+    DXGI_MODE_DESC targetDisplayMode = s_DXGIDisplayModes[s_DXGIDisplayModes.size() - 1];
+    {
+        targetDisplayMode.Width  = s_BackBufferSize.x;
+        targetDisplayMode.Height = s_BackBufferSize.y;
+    }
+
+    // Reconstruct the closest-matching display mode based on the user selections of resolution, refresh rate, etc.
+    DXGI_MODE_DESC closestDisplayMode;
+    ThrowIfFailed(s_DXGIOutputs[s_DXGIOutputsIndex]->FindClosestMatchingMode(&targetDisplayMode, &closestDisplayMode, nullptr));
+
+    ThrowIfFailed(s_DXGISwapChain->ResizeTarget(&closestDisplayMode));
 
     for (auto& swapChainImageView : s_SwapChainImages)
         swapChainImageView.Reset();
@@ -415,8 +494,8 @@ void ResizeSwapChain()
     s_DXGISwapChain->GetDesc(&swapChainInfo);
 
     ThrowIfFailed(s_DXGISwapChain->ResizeBuffers(s_SwapChainImageCount,
-                                                 s_ViewportSizeOutput.x,
-                                                 s_ViewportSizeOutput.y,
+                                                 s_BackBufferSize.x,
+                                                 s_BackBufferSize.y,
                                                  swapChainInfo.BufferDesc.Format,
                                                  swapChainInfo.Flags));
 
@@ -434,13 +513,14 @@ void ResizeSwapChain()
         rtvHandle.Offset(1, s_RTVDescriptorSize);
     }
 
-    s_ViewportSizeOutputPrev = s_ViewportSizeOutput;
+    s_BackBufferSizePrev = s_BackBufferSize;
+    s_WindowModePrev     = s_WindowMode;
 }
 
 void ReleaseGraphicsRuntime()
 {
     ImGui_ImplDX12_Shutdown();
-    ImGui_ImplWin32_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
     ImPlot::DestroyContext();
     ImGui::DestroyContext();
 
@@ -681,7 +761,8 @@ void InitializeGraphicsRuntime()
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;  // Enable Gamepad Controls
 
-        ImGui_ImplWin32_Init(s_Window);
+        // Auto-install message callbacks.
+        ImGui_ImplGlfw_InitForOther(s_Window, true);
 
         auto srvHeapCPUHandle = s_SRVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
         auto srvHeapGPUHandle = s_SRVDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
@@ -708,7 +789,7 @@ void InitializeGraphicsRuntime()
 void RenderInterface()
 {
     ImGui::SetNextWindowPos(ImVec2(0, 0));
-    ImGui::SetNextWindowSize(ImVec2((float)s_ViewportSizeOutput.x * 0.25f, (float)s_ViewportSizeOutput.y));
+    ImGui::SetNextWindowSize(ImVec2((float)s_BackBufferSize.x * 0.25f, (float)s_BackBufferSize.y));
     ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, FLT_MAX));
 
     ImGui::Begin("Settings", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize);
@@ -719,14 +800,18 @@ void RenderInterface()
     {
         StringListDropdown("Display", s_DXGIOutputNames, s_DXGIOutputsIndex);
 
+        ImGui::BeginDisabled(s_WindowMode != WindowMode::Windowed);
+
         if (StringListDropdown("Resolution", s_DXGIDisplayResolutionsStr, s_DXGIDisplayResolutionsIndex))
             s_UpdateFlags |= UpdateFlags::SwapChainResize;
+
+        ImGui::EndDisabled();
 
         if (StringListDropdown("Adapter", s_DXGIAdapterNames, s_DXGIAdapterIndex))
             s_UpdateFlags |= UpdateFlags::GraphicsRuntime;
 
         if (EnumDropdown<WindowMode>("Window Mode", reinterpret_cast<int*>(&s_WindowMode)))
-            s_UpdateFlags |= UpdateFlags::Window;
+            s_UpdateFlags |= UpdateFlags::SwapChainResize;
 
         if (EnumDropdown<SwapEffect>("Swap Effect", reinterpret_cast<int*>(&s_DXGISwapEffect)))
             s_UpdateFlags |= UpdateFlags::SwapChainRecreate;
@@ -838,123 +923,13 @@ void RenderInterface()
 
     ImGui::End();
 
-    ImGui::SetNextWindowPos(ImVec2((float)s_ViewportSizeOutput.x * 0.25f, 0.0f));
-    ImGui::SetNextWindowSize(ImVec2((float)s_ViewportSizeOutput.x * 0.75f, (float)s_ViewportSizeOutput.y));
+    ImGui::SetNextWindowPos(ImVec2((float)s_BackBufferSize.x * 0.25f, 0.0f));
+    ImGui::SetNextWindowSize(ImVec2((float)s_BackBufferSize.x * 0.75f, (float)s_BackBufferSize.y));
     ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, FLT_MAX));
 
     ImGui::Begin("Viewport", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
 
     ImGui::End();
-}
-
-void UpdateWindow()
-{
-    switch (s_WindowMode)
-    {
-        case WindowMode::Windowed:
-        {
-            ThrowIfFailed(s_DXGISwapChain->SetFullscreenState(false, nullptr));
-
-            // Restore the window's attributes and size.
-            SetWindowLong(s_Window, GWL_STYLE, s_WindowStyle);
-
-            SetWindowPos(s_Window,
-                         HWND_NOTOPMOST,
-                         s_WindowRect.left,
-                         s_WindowRect.top,
-                         s_WindowRect.right - s_WindowRect.left,
-                         s_WindowRect.bottom - s_WindowRect.top,
-                         SWP_FRAMECHANGED | SWP_NOACTIVATE);
-
-            ShowWindow(s_Window, SW_NORMAL);
-
-            break;
-        }
-
-        case WindowMode::BorderlessFullscreen:
-        {
-            ThrowIfFailed(s_DXGISwapChain->SetFullscreenState(false, nullptr));
-
-            // Save the old window rect so we can restore it when exiting fullscreen mode.
-            if (s_WindowModePrev == WindowMode::Windowed)
-                GetWindowRect(s_Window, &s_WindowRect);
-
-            // Make the window borderless so that the client area can fill the screen.
-            SetWindowLong(s_Window, GWL_STYLE, s_WindowStyle & ~(WS_CAPTION | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_THICKFRAME));
-
-            RECT fullscreenWindowRect;
-
-            try
-            {
-                if (s_DXGISwapChain)
-                {
-                    // Get the settings of the display on which the app's window is currently displayed
-                    ComPtr<IDXGIOutput> pOutput;
-                    ThrowIfFailed(s_DXGISwapChain->GetContainingOutput(&pOutput));
-
-                    DXGI_OUTPUT_DESC Desc;
-                    ThrowIfFailed(pOutput->GetDesc(&Desc));
-
-                    fullscreenWindowRect = Desc.DesktopCoordinates;
-                }
-                else
-                {
-                    // Fallback to EnumDisplaySettings implementation
-                    throw std::exception();
-                }
-            }
-            catch (std::exception& e)
-            {
-                UNREFERENCED_PARAMETER(e);
-
-                // Get the settings of the primary display
-                DEVMODE devMode = {};
-                devMode.dmSize  = sizeof(DEVMODE);
-                EnumDisplaySettings(nullptr, ENUM_CURRENT_SETTINGS, &devMode);
-
-                fullscreenWindowRect = { devMode.dmPosition.x,
-                                         devMode.dmPosition.y,
-                                         devMode.dmPosition.x + static_cast<LONG>(devMode.dmPelsWidth),
-                                         devMode.dmPosition.y + static_cast<LONG>(devMode.dmPelsHeight) };
-            }
-
-            SetWindowPos(s_Window,
-                         HWND_TOPMOST,
-                         fullscreenWindowRect.left,
-                         fullscreenWindowRect.top,
-                         fullscreenWindowRect.right,
-                         fullscreenWindowRect.bottom,
-                         SWP_FRAMECHANGED | SWP_NOACTIVATE);
-
-            ShowWindow(s_Window, SW_MAXIMIZE);
-
-            break;
-        }
-
-        case WindowMode::ExclusiveFullscreen:
-        {
-            // Save the old window rect so we can restore it when exiting fullscreen mode.
-            if (s_WindowModePrev == WindowMode::Windowed)
-                GetWindowRect(s_Window, &s_WindowRect);
-
-            if (SUCCEEDED(s_DXGISwapChain->SetFullscreenState(true, s_DXGIOutputs[s_DXGIOutputsIndex])))
-            {
-                // If swapping from borderless mode, we need to manually resize the swapchain here instead of
-                // the WM_SIZE windows message proc since the borderless fullscreen + exclusive fullscreen are the same size.
-                if (s_WindowModePrev == WindowMode::BorderlessFullscreen)
-                    ResizeSwapChain();
-
-                break;
-            }
-
-            spdlog::warn("Failed to go fullscreen. Check that the currently selected adapter has ownership of the display.");
-
-            // Return to windowed state.
-            s_WindowMode = s_WindowModePrev;
-        }
-    };
-
-    s_WindowModePrev = s_WindowMode;
 }
 
 void SyncSettings()
@@ -969,7 +944,7 @@ void SyncSettings()
 
             s_WindowMode = WindowMode::BorderlessFullscreen;
 
-            UpdateWindow();
+            UpdateWindowAndUpdateSwapChain();
         }
 
         WaitForDevice();
@@ -996,26 +971,7 @@ void SyncSettings()
     {
         WaitForDevice();
 
-        spdlog::info("Resizing Swap Chain");
-
-        DXGI_MODE_DESC targetDisplayMode = s_DXGIDisplayModes[s_DXGIDisplayModes.size() - 1];
-        {
-            targetDisplayMode.Width  = s_DXGIDisplayResolutions[s_DXGIDisplayResolutionsIndex].x;
-            targetDisplayMode.Height = s_DXGIDisplayResolutions[s_DXGIDisplayResolutionsIndex].y;
-        }
-
-        // Reconstruct the closest-matching display mode based on the user selections of resolution, refresh rate, etc.
-        DXGI_MODE_DESC closestDisplayMode;
-        ThrowIfFailed(s_DXGIOutputs[s_DXGIOutputsIndex]->FindClosestMatchingMode(&targetDisplayMode, &closestDisplayMode, nullptr));
-
-        ThrowIfFailed(s_DXGISwapChain->ResizeTarget(&closestDisplayMode));
-    }
-
-    if ((s_UpdateFlags & UpdateFlags::Window) != 0)
-    {
-        spdlog::info("Updating Window");
-
-        UpdateWindow();
+        UpdateWindowAndUpdateSwapChain();
     }
 
     // Clear update flags.
@@ -1033,7 +989,7 @@ void Render()
     ThrowIfFailed(s_CommandList->Reset(s_CommandAllocator.Get(), nullptr));
 
     ImGui_ImplDX12_NewFrame();
-    ImGui_ImplWin32_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
     auto presentToRenderBarrier = CD3DX12_RESOURCE_BARRIER::Transition(s_SwapChainImages[s_CurrentSwapChainImageIndex].Get(),
@@ -1049,14 +1005,14 @@ void Render()
     // Clear the overlay ui region.
     {
         const float clearColor[]   = { 1.0f, 1.0f, 1.0f, 1.0f };
-        D3D12_RECT  clearColorRect = { 0, 0, static_cast<LONG>(0.25L * s_ViewportSizeOutput.x), s_ViewportSizeOutput.y };
+        D3D12_RECT  clearColorRect = { 0, 0, static_cast<LONG>(0.25L * s_BackBufferSize.x), s_BackBufferSize.y };
         s_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 1, &clearColorRect);
     }
 
     // CLear the normal rendering viewport region.
     {
         const float clearColor[]   = { 0.2f, 0.2f, 0.75f, 1.0f };
-        D3D12_RECT  clearColorRect = { static_cast<LONG>(0.25L * s_ViewportSizeOutput.x), 0, s_ViewportSizeOutput.x, s_ViewportSizeOutput.y };
+        D3D12_RECT  clearColorRect = { static_cast<LONG>(0.25L * s_BackBufferSize.x), 0, s_BackBufferSize.x, s_BackBufferSize.y };
         s_CommandList->ClearRenderTargetView(rtvHandle, clearColor, 1, &clearColorRect);
     }
 
@@ -1080,41 +1036,6 @@ void Render()
     ThrowIfFailed(s_DXGISwapChain->Present(s_SyncInterval, 0));
 
     WaitForDevice();
-}
-
-// Forward declare message handler from imgui_impl_win32.cpp
-extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
-
-LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
-{
-    if (ImGui_ImplWin32_WndProcHandler(hWnd, message, wParam, lParam))
-        return true;
-
-    switch (message)
-    {
-        case WM_PAINT  : Render(); return 0;
-        case WM_DESTROY: PostQuitMessage(0); return 0;
-
-        case WM_SIZE:
-        {
-#if 0
-            s_ViewportSizeOutput = s_DXGIDisplayResolutions[s_DXGIDisplayResolutionsIndex];
-#else
-            RECT clientRect = {};
-
-            GetClientRect(hWnd, &clientRect);
-
-            s_ViewportSizeOutput.x = clientRect.right - clientRect.left;
-            s_ViewportSizeOutput.y = clientRect.bottom - clientRect.top;
-#endif
-
-            ResizeSwapChain();
-
-            return 0;
-        }
-    }
-
-    return DefWindowProc(hWnd, message, wParam, lParam);
 }
 
 inline std::string HrToString(HRESULT hr)
