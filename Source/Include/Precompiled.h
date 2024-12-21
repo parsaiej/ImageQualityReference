@@ -36,8 +36,8 @@
 #include <format>
 #include <set>
 
-#include "SplashImageBytes.h"
-#include "Util.h"
+#include <SplashImageBytes.h>
+#include <Util.h>
 
 using namespace Microsoft::WRL;
 

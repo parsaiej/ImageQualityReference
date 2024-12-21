@@ -4,39 +4,13 @@ extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 715; }
 extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\"; }
 // clang-format on
 
-// Import the imgui style.
-#include "OverlayStyle.h"
+#include <Interface.h>
 
 // Ref
 // -----------------------------
 // https://www.intel.com/content/www/us/en/developer/articles/code-sample/sample-application-for-direct3d-12-flip-model-swap-chains.html
 
-// Options
-// -----------------------------
-
-enum WindowMode
-{
-    Windowed,
-    BorderlessFullscreen,
-    ExclusiveFullscreen
-};
-
-enum SwapEffect
-{
-    FlipSequential,
-    FlipDiscard
-};
-
-enum UpdateFlags : uint32_t
-{
-    None              = 0,
-    Window            = 1 << 0,
-    SwapChainRecreate = 1 << 1,
-    SwapChainResize   = 1 << 2,
-    GraphicsRuntime   = 1 << 3
-};
-
-// State
+// Initialize State
 // -----------------------------
 
 // Report unreleased objects when this goes out of scope (after ComPtr).
@@ -130,14 +104,12 @@ tbb::task_group gTaskGroup;
 // Utility Prototypes
 // -----------------------------
 
-std::string FromWideStr(std::wstring str);
+// Message handle for a Microsoft Windows window.
+LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
 void CreateSwapChain();
 
 void ReleaseSwapChain();
-
-// Creates an OS window for Microsoft Windows.
-void CreateOperatingSystemWindow();
 
 // Enumerate a list of graphics adapters that support our usage of D3D12.
 void EnumerateSupportedAdapters();
@@ -147,18 +119,6 @@ void InitializeGraphicsRuntime();
 
 // Command list recording and queue submission for current swap chain image.
 void Render();
-
-// For per-frame imgui window creation.
-void RenderInterface();
-
-// Message handle for a Microsoft Windows window.
-LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
-
-// Create or sync DXGI, OS Window, Swapchain, HDR/SDR, V-Sync with current settings.
-void ValidatePresentation();
-
-// Crashing utility.
-void ThrowIfFailed(HRESULT hr);
 
 // Use fence primitives to pause the thread until the previous swap-chain image has finished being drawn and presented.
 void WaitForDevice();
@@ -239,82 +199,12 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
     if (gWindowMode == WindowMode::ExclusiveFullscreen)
         gDXGISwapChain->SetFullscreenState(false, nullptr);
 
-    // Shut down imgui.
-    {
-        ImGui_ImplDX12_Shutdown();
-        ImGui_ImplGlfw_Shutdown();
-        ImPlot::DestroyContext();
-        ImGui::DestroyContext();
-    }
+    Interface::Release();
 
     glfwDestroyWindow(gWindow);
     glfwTerminate();
 
     return 0;
-}
-
-std::string FromWideStr(std::wstring wstr)
-{
-    // Determine the size of the resulting string
-    int size = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, nullptr, 0, nullptr, nullptr);
-
-    if (size == 0)
-        throw std::runtime_error("Failed to convert wide string to string.");
-
-    // Allocate a buffer for the resulting string
-    std::string str(size - 1, '\0'); // size - 1 because size includes the null terminator
-    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &str[0], size, nullptr, nullptr);
-
-    return str;
-}
-
-template <typename T>
-bool EnumDropdown(const char* name, int* selectedEnumIndex)
-{
-    constexpr auto enumNames = magic_enum::enum_names<T>();
-
-    std::vector<const char*> enumNameStrings(enumNames.size());
-
-    for (uint32_t enumIndex = 0U; enumIndex < enumNames.size(); enumIndex++)
-        enumNameStrings[enumIndex] = enumNames[enumIndex].data();
-
-    return ImGui::Combo(name, selectedEnumIndex, enumNameStrings.data(), static_cast<int>(enumNameStrings.size()));
-}
-
-bool StringListDropdown(const char* name, const std::vector<std::string>& strings, int& selectedIndex)
-{
-    if (strings.empty())
-        return false;
-
-    bool modified = false;
-
-    if (ImGui::BeginCombo(name, strings[selectedIndex].c_str()))
-    {
-        for (int i = 0; i < strings.size(); i++)
-        {
-            if (ImGui::Selectable(strings[i].c_str(), selectedIndex == i))
-            {
-                selectedIndex = i;
-                modified      = true;
-            }
-
-            if (selectedIndex == i)
-                ImGui::SetItemDefaultFocus();
-        }
-        ImGui::EndCombo();
-    }
-
-    return modified;
-}
-
-bool StringListDropdown(const char* name, const char* const* cstrings, size_t size, int& selectedIndex)
-{
-    std::vector<std::string> strings;
-
-    for (uint32_t i = 0; i < size; i++)
-        strings.push_back(cstrings[i]);
-
-    return StringListDropdown(name, strings, selectedIndex);
 }
 
 void EnumerateSupportedAdapters()
@@ -796,43 +686,7 @@ void InitializeGraphicsRuntime()
     // Initialize ImGui.
     // ------------------------------------------
 
-    {
-        if (ImGui::GetCurrentContext() != nullptr)
-        {
-            ImGui_ImplDX12_Shutdown();
-            ImGui_ImplGlfw_Shutdown();
-            ImPlot::DestroyContext();
-            ImGui::DestroyContext();
-        }
-
-        IMGUI_CHECKVERSION();
-        ImGui::CreateContext();
-        ImPlot::CreateContext();
-
-        ImGuiIO& io = ImGui::GetIO();
-
-        (void)io;
-        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-
-        // NOTE: Enabling this causes a 200+ ms hitch on the first NewFrame() call.
-        // Disable it for now to remove that hitch.
-        // io.ConfigFlags |= ImGuiConfigFlaggNavEnableGamepad;
-
-        // Auto-install message callbacks.
-        ImGui_ImplGlfw_InitForOther(gWindow, true);
-
-        auto srvHeapCPUHandle = gSRVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-        auto srvHeapGPUHandle = gSRVDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
-
-        ImGui_ImplDX12_Init(gLogicalDevice.Get(),
-                            DXGI_MAX_SWAP_CHAIN_BUFFERS,
-                            DXGI_FORMAT_R8G8B8A8_UNORM,
-                            gSRVDescriptorHeap.Get(),
-                            srvHeapCPUHandle,
-                            srvHeapGPUHandle);
-
-        SetStyle();
-    }
+    Interface::Create();
 
     // Log a message containing information about the adapter.
     // ------------------------------------------
@@ -841,181 +695,6 @@ void InitializeGraphicsRuntime()
         spdlog::info("Device: {}", gDXGIAdapterNames[gDXGIAdapterIndex]);
         spdlog::info("VRAM:   {} GB", gDXGIAdapterInfos[gDXGIAdapterIndex].DedicatedVideoMemory / static_cast<float>(1024 * 1024 * 1024));
     }
-}
-
-void RenderInterface()
-{
-    ImGui::SetNextWindowPos(ImVec2(0, 0));
-    ImGui::SetNextWindowSize(ImVec2((float)gBackBufferSize.x * 0.25f, (float)gBackBufferSize.y));
-    ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, FLT_MAX));
-
-    ImGui::Begin("Settings", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize);
-
-    ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x * 0.7f);
-
-    if (ImGui::CollapsingHeader("Presentation", ImGuiTreeNodeFlags_DefaultOpen))
-    {
-        StringListDropdown("Display", gDXGIOutputNames, gDXGIOutputsIndex);
-
-        ImGui::BeginDisabled(gWindowMode != WindowMode::Windowed);
-
-        if (StringListDropdown("Resolution", gDXGIDisplayResolutionsStr, gDXGIDisplayResolutionsIndex))
-            gUpdateFlags |= UpdateFlags::SwapChainResize;
-
-        ImGui::EndDisabled();
-
-        ImGui::BeginDisabled(gWindowMode != WindowMode::ExclusiveFullscreen);
-
-        if (StringListDropdown("Refresh Rate", gDXGIDisplayRefreshRatesStr, gDXGIDisplayRefreshRatesIndex))
-            gUpdateFlags |= UpdateFlags::SwapChainResize;
-
-        ImGui::EndDisabled();
-
-        if (StringListDropdown("Adapter", gDXGIAdapterNames, gDXGIAdapterIndex))
-            gUpdateFlags |= UpdateFlags::GraphicsRuntime;
-
-        if (EnumDropdown<WindowMode>("Window Mode", reinterpret_cast<int*>(&gWindowMode)))
-            gUpdateFlags |= UpdateFlags::SwapChainResize;
-
-        if (EnumDropdown<SwapEffect>("Swap Effect", reinterpret_cast<int*>(&gDXGISwapEffect)))
-            gUpdateFlags |= UpdateFlags::SwapChainRecreate;
-
-        ImGui::SliderInt("V-Sync Interval", &gSyncInterval, 0, 4);
-
-#if 0
-        if (ImGui::SliderInt("Buffering", reinterpret_cast<int*>(&gSwapChainImageCount), 2, DXGI_MAX_SWAP_CHAIN_BUFFERS - 1))
-            gUpdateFlags |= UpdateFlags::SwapChainRecreate;
-
-        static int gFramesInFlightCount = 1;
-        ImGui::SliderInt("Frames in Flight", &gFramesInFlightCount, 1, 16);
-#endif
-    }
-
-    if (ImGui::CollapsingHeader("Rendering", ImGuiTreeNodeFlags_DefaultOpen))
-    {
-        if (!gDSRVariantDescs.empty())
-            StringListDropdown("DirectSR Algorithm", gDSRVariantNames, gDSRVariantIndex);
-        else
-            StringListDropdown("DirectSR Algorithm", { "None" }, gDSRVariantIndex);
-    }
-
-    if (ImGui::CollapsingHeader("Analysis", ImGuiTreeNodeFlags_DefaultOpen))
-    {
-        ImGui::Text("TODO");
-    }
-
-    static int selectedPerformanceGraphMode;
-
-    if (ImGui::CollapsingHeader("Performance", ImGuiTreeNodeFlags_DefaultOpen))
-    {
-        constexpr std::array<const char*, 2> graphModes = { "Frame Time (Milliseconds)", "Frames-per-Second" };
-
-        StringListDropdown("Graph Mode", graphModes.data(), graphModes.size(), selectedPerformanceGraphMode);
-    }
-
-    if (ImGui::CollapsingHeader("Log", ImGuiTreeNodeFlags_DefaultOpen))
-    {
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.1f, 0.1f, 0.1f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.8f, 0.8f, 0.8f, 1.0f));
-
-        if (ImGui::BeginChild("##LogChild", ImVec2(0, 200), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar))
-        {
-            ImGui::TextUnformatted(gLoggerMemory->str().c_str());
-
-            if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
-                ImGui::SetScrollHereY(1.0F);
-        }
-        ImGui::EndChild();
-
-        ImGui::PopStyleColor(2);
-    }
-
-    ImGui::PopItemWidth();
-
-    ImGui::End();
-
-    ImGui::SetNextWindowPos(ImVec2((float)gBackBufferSize.x * 0.25f, 0.0f));
-    ImGui::SetNextWindowSize(ImVec2((float)gBackBufferSize.x * 0.75f, (float)gBackBufferSize.y * 0.75f));
-    ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, FLT_MAX));
-
-    ImGui::Begin("Viewport", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
-
-    ImGui::End();
-
-    ImGui::SetNextWindowPos(ImVec2((float)gBackBufferSize.x * 0.25f, (float)gBackBufferSize.y * 0.75f));
-    ImGui::SetNextWindowSize(ImVec2((float)gBackBufferSize.x * 0.75f, (float)gBackBufferSize.y * 0.25f));
-    ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, FLT_MAX));
-
-    ImGui::Begin("##PerformanceGraphs", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse);
-
-    static float elapsedTime = 0;
-    elapsedTime += gDeltaTime;
-
-    switch (selectedPerformanceGraphMode)
-    {
-        case 0:
-        {
-            float deltaTimeMs = 1000.0f * gDeltaTime;
-            gDeltaTimeMovingAverage.AddValue(deltaTimeMs);
-            gDeltaTimeBuffer.AddPoint(elapsedTime, deltaTimeMs);
-            gDeltaTimeMovingAverageBuffer.AddPoint(elapsedTime, gDeltaTimeMovingAverage.GetAverage());
-            break;
-        }
-
-        case 1:
-        {
-            float framesPerSecond = 1.0f / gDeltaTime;
-            gDeltaTimeMovingAverage.AddValue(framesPerSecond);
-            gDeltaTimeBuffer.AddPoint(elapsedTime, framesPerSecond);
-            gDeltaTimeMovingAverageBuffer.AddPoint(elapsedTime, gDeltaTimeMovingAverage.GetAverage());
-            break;
-        }
-    }
-
-    static float history = 3.0f;
-
-    if (ImPlot::BeginPlot("##PerformanceChild", ImVec2(-1, -1)))
-    {
-        ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, 0x0);
-        ImPlot::SetupAxisLimits(ImAxis_X1, elapsedTime - history, elapsedTime, ImGuiCond_Always);
-        ImPlot::SetupAxisLimits(ImAxis_Y1, 0, gDeltaTimeMovingAverage.GetAverage() * 2.0, ImGuiCond_Always);
-
-        ImPlot::SetNextLineStyle(IMPLOT_AUTO_COL, 1.0);
-
-        // Custom tick label showing the average ms/fps only.
-        {
-            double middleTick = gDeltaTimeMovingAverage.GetAverage();
-
-            // Define the label for the middle tick
-            auto        averageStr      = std::format("{:.2f}", gDeltaTimeMovingAverage.GetAverage());
-            const char* middleTickLabel = averageStr.c_str();
-
-            // Set the custom ticks on the y-axis
-            ImPlot::SetupAxisTicks(ImAxis_Y1, &middleTick, 1, &middleTickLabel);
-        }
-
-        ImPlot::PlotLine("Exact",
-                         &gDeltaTimeBuffer.mData[0].x,
-                         &gDeltaTimeBuffer.mData[0].y,
-                         gDeltaTimeBuffer.mData.size(),
-                         ImPlotLineFlags_None,
-                         gDeltaTimeBuffer.mOffset,
-                         2 * sizeof(float));
-
-        ImPlot::SetNextLineStyle(IMPLOT_AUTO_COL, 2.0);
-
-        ImPlot::PlotLine("Smoothed",
-                         &gDeltaTimeMovingAverageBuffer.mData[0].x,
-                         &gDeltaTimeMovingAverageBuffer.mData[0].y,
-                         gDeltaTimeMovingAverageBuffer.mData.size(),
-                         ImPlotLineFlags_None,
-                         gDeltaTimeMovingAverageBuffer.mOffset,
-                         2 * sizeof(float));
-
-        ImPlot::EndPlot();
-    }
-
-    ImGui::End();
 }
 
 void SyncSettings()
@@ -1072,10 +751,6 @@ void Render()
 
     ThrowIfFailed(gCommandList->Reset(gCommandAllocator.Get(), nullptr));
 
-    ImGui_ImplDX12_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
-    ImGui::NewFrame();
-
     auto presentToRenderBarrier = CD3DX12_RESOURCE_BARRIER::Transition(gSwapChainImages[gCurrentSwapChainImageIndex].Get(),
                                                                        D3D12_RESOURCE_STATE_PRESENT,
                                                                        D3D12_RESOURCE_STATE_RENDER_TARGET);
@@ -1100,8 +775,7 @@ void Render()
         gCommandList->ClearRenderTargetView(rtvHandle, clearColor, 1, &clearColorRect);
     }
 
-    RenderInterface();
-    ImGui::Render();
+    Interface::Draw();
 
     gCommandList->SetDescriptorHeaps(1, gSRVDescriptorHeap.GetAddressOf());
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), gCommandList.Get());
@@ -1120,33 +794,6 @@ void Render()
     ThrowIfFailed(gDXGISwapChain->Present(gSyncInterval, 0));
 
     WaitForDevice();
-}
-
-inline std::string HrToString(HRESULT hr)
-{
-    char gstr[64] = {};
-    sprintf_s(gstr, "HRESULT of 0x%08X", static_cast<UINT>(hr));
-    return std::string(gstr);
-}
-
-class HrException : public std::runtime_error
-{
-public:
-
-    HrException(HRESULT hr) : std::runtime_error(HrToString(hr)), m_hr(hr) {}
-    HRESULT Error() const { return m_hr; }
-
-private:
-
-    const HRESULT m_hr;
-};
-
-void ThrowIfFailed(HRESULT hr)
-{
-    if (FAILED(hr))
-    {
-        throw HrException(hr);
-    }
 }
 
 void WaitForDevice()
