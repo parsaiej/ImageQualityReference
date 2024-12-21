@@ -235,6 +235,10 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
         Render();
     }
 
+    // Before swapchain is released we need to close the fullscreen state.
+    if (gWindowMode == WindowMode::ExclusiveFullscreen)
+        gDXGISwapChain->SetFullscreenState(false, nullptr);
+
     // Shut down imgui.
     {
         ImGui_ImplDX12_Shutdown();
@@ -242,6 +246,9 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
         ImPlot::DestroyContext();
         ImGui::DestroyContext();
     }
+
+    glfwDestroyWindow(gWindow);
+    glfwTerminate();
 
     return 0;
 }
@@ -897,79 +904,13 @@ void RenderInterface()
         ImGui::Text("TODO");
     }
 
+    static int selectedPerformanceGraphMode;
+
     if (ImGui::CollapsingHeader("Performance", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        static float elapsedTime = 0;
-        elapsedTime += gDeltaTime;
-
         constexpr std::array<const char*, 2> graphModes = { "Frame Time (Milliseconds)", "Frames-per-Second" };
 
-        static int selectedPerformanceGraphMode;
         StringListDropdown("Graph Mode", graphModes.data(), graphModes.size(), selectedPerformanceGraphMode);
-
-        switch (selectedPerformanceGraphMode)
-        {
-            case 0:
-            {
-                float deltaTimeMs = 1000.0f * gDeltaTime;
-                gDeltaTimeMovingAverage.AddValue(deltaTimeMs);
-                gDeltaTimeBuffer.AddPoint(elapsedTime, deltaTimeMs);
-                gDeltaTimeMovingAverageBuffer.AddPoint(elapsedTime, gDeltaTimeMovingAverage.GetAverage());
-                break;
-            }
-
-            case 1:
-            {
-                float framesPerSecond = 1.0f / gDeltaTime;
-                gDeltaTimeMovingAverage.AddValue(framesPerSecond);
-                gDeltaTimeBuffer.AddPoint(elapsedTime, framesPerSecond);
-                gDeltaTimeMovingAverageBuffer.AddPoint(elapsedTime, gDeltaTimeMovingAverage.GetAverage());
-                break;
-            }
-        }
-
-        static float history = 3.0f;
-
-        if (ImPlot::BeginPlot("##PerformanceChild", ImVec2(-1, 150)))
-        {
-            ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, 0x0);
-            ImPlot::SetupAxisLimits(ImAxis_X1, elapsedTime - history, elapsedTime, ImGuiCond_Always);
-            ImPlot::SetupAxisLimits(ImAxis_Y1, 0, gDeltaTimeMovingAverage.GetAverage() * 2.0, ImGuiCond_Always);
-
-            ImPlot::SetNextLineStyle(IMPLOT_AUTO_COL, 1.0);
-
-            // Custom tick label showing the average ms/fps only.
-            {
-                double middleTick = gDeltaTimeMovingAverage.GetAverage();
-
-                // Define the label for the middle tick
-                auto        averageStr      = std::format("{:.2f}", gDeltaTimeMovingAverage.GetAverage());
-                const char* middleTickLabel = averageStr.c_str();
-
-                // Set the custom ticks on the y-axis
-                ImPlot::SetupAxisTicks(ImAxis_Y1, &middleTick, 1, &middleTickLabel);
-            }
-
-            ImPlot::PlotLine("Exact",
-                             &gDeltaTimeBuffer.mData[0].x,
-                             &gDeltaTimeBuffer.mData[0].y,
-                             gDeltaTimeBuffer.mData.size(),
-                             ImPlotLineFlags_None,
-                             gDeltaTimeBuffer.mOffset,
-                             2 * sizeof(float));
-
-            ImPlot::SetNextLineStyle(IMPLOT_AUTO_COL, 2.0);
-
-            ImPlot::PlotLine("Smoothed",
-                             &gDeltaTimeMovingAverageBuffer.mData[0].x,
-                             &gDeltaTimeMovingAverageBuffer.mData[0].y,
-                             gDeltaTimeMovingAverageBuffer.mData.size(),
-                             ImPlotLineFlags_None,
-                             gDeltaTimeMovingAverageBuffer.mOffset,
-                             2 * sizeof(float));
-
-            ImPlot::EndPlot();
-        }
     }
 
     if (ImGui::CollapsingHeader("Log", ImGuiTreeNodeFlags_DefaultOpen))
@@ -993,15 +934,88 @@ void RenderInterface()
 
     ImGui::End();
 
-#if 0
     ImGui::SetNextWindowPos(ImVec2((float)gBackBufferSize.x * 0.25f, 0.0f));
-    ImGui::SetNextWindowSize(ImVec2((float)gBackBufferSize.x * 0.75f, (float)gBackBufferSize.y));
+    ImGui::SetNextWindowSize(ImVec2((float)gBackBufferSize.x * 0.75f, (float)gBackBufferSize.y * 0.75f));
     ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, FLT_MAX));
 
-    ImGui::Begin("Viewport", nullptr, ImGuiWindowFlaggNoMove | ImGuiWindowFlaggNoCollapse);
+    ImGui::Begin("Viewport", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
 
     ImGui::End();
-#endif
+
+    ImGui::SetNextWindowPos(ImVec2((float)gBackBufferSize.x * 0.25f, (float)gBackBufferSize.y * 0.75f));
+    ImGui::SetNextWindowSize(ImVec2((float)gBackBufferSize.x * 0.75f, (float)gBackBufferSize.y * 0.25f));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, FLT_MAX));
+
+    ImGui::Begin("##PerformanceGraphs", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse);
+
+    static float elapsedTime = 0;
+    elapsedTime += gDeltaTime;
+
+    switch (selectedPerformanceGraphMode)
+    {
+        case 0:
+        {
+            float deltaTimeMs = 1000.0f * gDeltaTime;
+            gDeltaTimeMovingAverage.AddValue(deltaTimeMs);
+            gDeltaTimeBuffer.AddPoint(elapsedTime, deltaTimeMs);
+            gDeltaTimeMovingAverageBuffer.AddPoint(elapsedTime, gDeltaTimeMovingAverage.GetAverage());
+            break;
+        }
+
+        case 1:
+        {
+            float framesPerSecond = 1.0f / gDeltaTime;
+            gDeltaTimeMovingAverage.AddValue(framesPerSecond);
+            gDeltaTimeBuffer.AddPoint(elapsedTime, framesPerSecond);
+            gDeltaTimeMovingAverageBuffer.AddPoint(elapsedTime, gDeltaTimeMovingAverage.GetAverage());
+            break;
+        }
+    }
+
+    static float history = 3.0f;
+
+    if (ImPlot::BeginPlot("##PerformanceChild", ImVec2(-1, -1)))
+    {
+        ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, 0x0);
+        ImPlot::SetupAxisLimits(ImAxis_X1, elapsedTime - history, elapsedTime, ImGuiCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, 0, gDeltaTimeMovingAverage.GetAverage() * 2.0, ImGuiCond_Always);
+
+        ImPlot::SetNextLineStyle(IMPLOT_AUTO_COL, 1.0);
+
+        // Custom tick label showing the average ms/fps only.
+        {
+            double middleTick = gDeltaTimeMovingAverage.GetAverage();
+
+            // Define the label for the middle tick
+            auto        averageStr      = std::format("{:.2f}", gDeltaTimeMovingAverage.GetAverage());
+            const char* middleTickLabel = averageStr.c_str();
+
+            // Set the custom ticks on the y-axis
+            ImPlot::SetupAxisTicks(ImAxis_Y1, &middleTick, 1, &middleTickLabel);
+        }
+
+        ImPlot::PlotLine("Exact",
+                         &gDeltaTimeBuffer.mData[0].x,
+                         &gDeltaTimeBuffer.mData[0].y,
+                         gDeltaTimeBuffer.mData.size(),
+                         ImPlotLineFlags_None,
+                         gDeltaTimeBuffer.mOffset,
+                         2 * sizeof(float));
+
+        ImPlot::SetNextLineStyle(IMPLOT_AUTO_COL, 2.0);
+
+        ImPlot::PlotLine("Smoothed",
+                         &gDeltaTimeMovingAverageBuffer.mData[0].x,
+                         &gDeltaTimeMovingAverageBuffer.mData[0].y,
+                         gDeltaTimeMovingAverageBuffer.mData.size(),
+                         ImPlotLineFlags_None,
+                         gDeltaTimeMovingAverageBuffer.mOffset,
+                         2 * sizeof(float));
+
+        ImPlot::EndPlot();
+    }
+
+    ImGui::End();
 }
 
 void SyncSettings()
