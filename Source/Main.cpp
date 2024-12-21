@@ -27,13 +27,13 @@ int gCurrentSwapChainImageIndex;
 int gRTVDescriptorSize;
 int gSRVDescriptorSize;
 
-ComPtr<ID3D12Device>              gLogicalDevice     = nullptr;
-ComPtr<IDSRDevice>                gDSRDevice         = nullptr;
-ComPtr<ID3D12CommandQueue>        gCommandQueue      = nullptr;
-ComPtr<ID3D12DescriptorHeap>      gRTVDescriptorHeap = nullptr;
-ComPtr<ID3D12DescriptorHeap>      gSRVDescriptorHeap = nullptr;
-ComPtr<ID3D12CommandAllocator>    gCommandAllocator  = nullptr;
-ComPtr<ID3D12GraphicsCommandList> gCommandList       = nullptr;
+ComPtr<ID3D12Device>              gLogicalDevice              = nullptr;
+ComPtr<IDSRDevice>                gDSRDevice                  = nullptr;
+ComPtr<ID3D12CommandQueue>        gCommandQueue               = nullptr;
+ComPtr<ID3D12DescriptorHeap>      gSwapChainDescriptorHeapRTV = nullptr;
+ComPtr<ID3D12DescriptorHeap>      gImguiDescriptorHeapSRV     = nullptr;
+ComPtr<ID3D12CommandAllocator>    gCommandAllocator           = nullptr;
+ComPtr<ID3D12GraphicsCommandList> gCommandList                = nullptr;
 
 std::vector<ComPtr<ID3D12Resource>> gSwapChainImages;
 uint32_t                            gSwapChainImageCount = 2;
@@ -129,7 +129,7 @@ void SyncSettings();
 // Entry-point
 // -----------------------------
 
-_Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
+_Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
 {
     gInstance = hInstance;
 
@@ -230,8 +230,6 @@ void EnumerateSupportedAdapters()
         gDXGIAdapterInfos.push_back(desc);
     }
 
-    SetDebugName(pDXGIFactory.Get(), L"Temporary Enumeration Adapter");
-
     // Extract a list of supported adapter names for presentation to the user.
     std::transform(gDXGIAdapterInfos.begin(),
                    gDXGIAdapterInfos.end(),
@@ -270,21 +268,25 @@ void CreateSwapChain()
     ComPtr<IDXGISwapChain1> swapChain;
     ThrowIfFailed(gDXGIFactory->CreateSwapChainForHwnd(gCommandQueue.Get(), gWindowNative, &swapChainDesc, nullptr, nullptr, &swapChain));
 
-    // Does not support fullscreen transitions.
     ThrowIfFailed(gDXGIFactory->MakeWindowAssociation(gWindowNative, DXGI_MWA_NO_ALT_ENTER));
 
     ThrowIfFailed(swapChain.As(&gDXGISwapChain));
     gCurrentSwapChainImageIndex = gDXGISwapChain->GetCurrentBackBufferIndex();
 
-    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(gRTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+    CD3DX12_CPU_DESCRIPTOR_HANDLE swapChainBufferRTV(gSwapChainDescriptorHeapRTV->GetCPUDescriptorHandleForHeapStart());
 
     gSwapChainImages.resize(gSwapChainImageCount);
 
     for (UINT swapChainImageIndex = 0; swapChainImageIndex < gSwapChainImageCount; swapChainImageIndex++)
     {
+        // Obtain the swao chain image buffer.
         ThrowIfFailed(gDXGISwapChain->GetBuffer(swapChainImageIndex, IID_PPV_ARGS(&gSwapChainImages[swapChainImageIndex])));
-        gLogicalDevice->CreateRenderTargetView(gSwapChainImages[swapChainImageIndex].Get(), nullptr, rtvHandle);
-        rtvHandle.Offset(1, gRTVDescriptorSize);
+
+        // Attach a render target view to the swap chain image.
+        gLogicalDevice->CreateRenderTargetView(gSwapChainImages[swapChainImageIndex].Get(), nullptr, swapChainBufferRTV);
+
+        // Advance to the next swap chain image.
+        swapChainBufferRTV.Offset(1, gRTVDescriptorSize);
     }
 }
 
@@ -417,6 +419,7 @@ void UpdateWindowAndSwapChain()
 
     ThrowIfFailed(gDXGISwapChain->ResizeTarget(&closestDisplayMode));
 
+    // Need to release the swap chain image views before resizing the swap chain.
     for (auto& swapChainImageView : gSwapChainImages)
         swapChainImageView.Reset();
 
@@ -429,18 +432,19 @@ void UpdateWindowAndSwapChain()
                                                 swapChainInfo.BufferDesc.Format,
                                                 swapChainInfo.Flags));
 
+    // Reset the swap chain image index.
     gCurrentSwapChainImageIndex = gDXGISwapChain->GetCurrentBackBufferIndex();
 
-    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(gRTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+    CD3DX12_CPU_DESCRIPTOR_HANDLE swapChainBufferRTV(gSwapChainDescriptorHeapRTV->GetCPUDescriptorHandleForHeapStart());
 
     gSwapChainImages.resize(gSwapChainImageCount);
 
     for (UINT swapChainImageIndex = 0; swapChainImageIndex < gSwapChainImageCount; swapChainImageIndex++)
     {
         ThrowIfFailed(gDXGISwapChain->GetBuffer(swapChainImageIndex, IID_PPV_ARGS(gSwapChainImages[swapChainImageIndex].GetAddressOf())));
-        gLogicalDevice->CreateRenderTargetView(gSwapChainImages[swapChainImageIndex].Get(), nullptr, rtvHandle);
+        gLogicalDevice->CreateRenderTargetView(gSwapChainImages[swapChainImageIndex].Get(), nullptr, swapChainBufferRTV);
 
-        rtvHandle.Offset(1, gRTVDescriptorSize);
+        swapChainBufferRTV.Offset(1, gRTVDescriptorSize);
     }
 
     gBackBufferSizePrev = gBackBufferSize;
@@ -596,17 +600,17 @@ void InitializeGraphicsRuntime()
     // ------------------------------------------
 
     {
-        D3D12_DESCRIPTOR_HEAP_DESC rtvHeapDesc = {};
-        rtvHeapDesc.NumDescriptors             = 32;
-        rtvHeapDesc.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-        rtvHeapDesc.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-        ThrowIfFailed(gLogicalDevice->CreateDescriptorHeap(&rtvHeapDesc, IID_PPV_ARGS(&gRTVDescriptorHeap)));
+        D3D12_DESCRIPTOR_HEAP_DESC swapChainBufferDescriptorHeapDescRTV = {};
+        swapChainBufferDescriptorHeapDescRTV.NumDescriptors             = 16; // Allocate the likely max swap chain images we will ever encounter.
+        swapChainBufferDescriptorHeapDescRTV.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+        swapChainBufferDescriptorHeapDescRTV.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+        ThrowIfFailed(gLogicalDevice->CreateDescriptorHeap(&swapChainBufferDescriptorHeapDescRTV, IID_PPV_ARGS(&gSwapChainDescriptorHeapRTV)));
 
-        D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc = {};
-        srvHeapDesc.NumDescriptors             = 32;
-        srvHeapDesc.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        srvHeapDesc.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-        ThrowIfFailed(gLogicalDevice->CreateDescriptorHeap(&srvHeapDesc, IID_PPV_ARGS(&gSRVDescriptorHeap)));
+        D3D12_DESCRIPTOR_HEAP_DESC imguiDescriptorHeapDescSRV = {};
+        imguiDescriptorHeapDescSRV.NumDescriptors             = 1;
+        imguiDescriptorHeapDescSRV.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        imguiDescriptorHeapDescSRV.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        ThrowIfFailed(gLogicalDevice->CreateDescriptorHeap(&imguiDescriptorHeapDescSRV, IID_PPV_ARGS(&gImguiDescriptorHeapSRV)));
 
         gRTVDescriptorSize = gLogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
         gSRVDescriptorSize = gLogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -622,8 +626,6 @@ void InitializeGraphicsRuntime()
     // ------------------------------------------
 
     ThrowIfFailed(gLogicalDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&gCommandAllocator)));
-
-    SetDebugName(gCommandAllocator.Get(), L"Command Allocator");
 
     // Initialize DirectSR device.
     // ------------------------------------------
@@ -756,28 +758,29 @@ void Render()
                                                                        D3D12_RESOURCE_STATE_RENDER_TARGET);
     gCommandList->ResourceBarrier(1, &presentToRenderBarrier);
 
-    CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(gRTVDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
-                                            gCurrentSwapChainImageIndex,
-                                            gRTVDescriptorSize);
-    gCommandList->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
+    // Obtain the render target view for the current swap chain image.
+    CD3DX12_CPU_DESCRIPTOR_HANDLE currentSwapChainBufferRTV(gSwapChainDescriptorHeapRTV->GetCPUDescriptorHandleForHeapStart(),
+                                                            gCurrentSwapChainImageIndex,
+                                                            gRTVDescriptorSize);
+    gCommandList->OMSetRenderTargets(1, &currentSwapChainBufferRTV, FALSE, nullptr);
 
     // Clear the overlay ui region.
     {
         const float clearColor[]   = { 1.0f, 1.0f, 1.0f, 1.0f };
         D3D12_RECT  clearColorRect = { 0, 0, static_cast<LONG>(0.25L * gBackBufferSize.x), gBackBufferSize.y };
-        gCommandList->ClearRenderTargetView(rtvHandle, clearColor, 1, &clearColorRect);
+        gCommandList->ClearRenderTargetView(currentSwapChainBufferRTV, clearColor, 1, &clearColorRect);
     }
 
     // CLear the normal rendering viewport region.
     {
         const float clearColor[]   = { 0.2f, 0.2f, 0.75f, 1.0f };
         D3D12_RECT  clearColorRect = { static_cast<LONG>(0.25L * gBackBufferSize.x), 0, gBackBufferSize.x, gBackBufferSize.y };
-        gCommandList->ClearRenderTargetView(rtvHandle, clearColor, 1, &clearColorRect);
+        gCommandList->ClearRenderTargetView(currentSwapChainBufferRTV, clearColor, 1, &clearColorRect);
     }
 
     Interface::Draw();
 
-    gCommandList->SetDescriptorHeaps(1, gSRVDescriptorHeap.GetAddressOf());
+    gCommandList->SetDescriptorHeaps(1, gImguiDescriptorHeapSRV.GetAddressOf());
     ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(), gCommandList.Get());
 
     auto renderToPresentBarrier = CD3DX12_RESOURCE_BARRIER::Transition(gSwapChainImages[gCurrentSwapChainImageIndex].Get(),

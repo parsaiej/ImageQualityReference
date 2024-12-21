@@ -23,13 +23,13 @@ void Interface::Create()
     // Auto-install message callbacks.
     ImGui_ImplGlfw_InitForOther(gWindow, true);
 
-    auto srvHeapCPUHandle = gSRVDescriptorHeap->GetCPUDescriptorHandleForHeapStart();
-    auto srvHeapGPUHandle = gSRVDescriptorHeap->GetGPUDescriptorHandleForHeapStart();
+    auto srvHeapCPUHandle = gImguiDescriptorHeapSRV->GetCPUDescriptorHandleForHeapStart();
+    auto srvHeapGPUHandle = gImguiDescriptorHeapSRV->GetGPUDescriptorHandleForHeapStart();
 
     ImGui_ImplDX12_Init(gLogicalDevice.Get(),
                         DXGI_MAX_SWAP_CHAIN_BUFFERS,
                         DXGI_FORMAT_R8G8B8A8_UNORM,
-                        gSRVDescriptorHeap.Get(),
+                        gImguiDescriptorHeapSRV.Get(),
                         srvHeapCPUHandle,
                         srvHeapGPUHandle);
 
@@ -136,14 +136,6 @@ void Interface::Draw()
     }
 
     ImGui::PopItemWidth();
-
-    ImGui::End();
-
-    ImGui::SetNextWindowPos(ImVec2((float)gBackBufferSize.x * 0.25f, 0.0f));
-    ImGui::SetNextWindowSize(ImVec2((float)gBackBufferSize.x * 0.75f, (float)gBackBufferSize.y * 0.75f));
-    ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, FLT_MAX));
-
-    ImGui::Begin("Viewport", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
 
     ImGui::End();
 

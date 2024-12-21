@@ -23,14 +23,15 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Packages
 # --------------------------------
 
-find_package(spdlog          CONFIG REQUIRED)
-find_package(Jolt            CONFIG REQUIRED)
-find_package(imgui           CONFIG REQUIRED)
-find_package(implot          CONFIG REQUIRED)
-find_package(magic_enum      CONFIG REQUIRED)
-find_package(glfw3           CONFIG REQUIRED)
-find_package(TBB             CONFIG REQUIRED)   
-find_package(Stb                    REQUIRED)
+find_package(spdlog                 CONFIG REQUIRED)
+find_package(Jolt                   CONFIG REQUIRED)
+find_package(imgui                  CONFIG REQUIRED)
+find_package(implot                 CONFIG REQUIRED)
+find_package(magic_enum             CONFIG REQUIRED)
+find_package(glfw3                  CONFIG REQUIRED)
+find_package(TBB                    CONFIG REQUIRED)  
+find_package(d3d12-memory-allocator CONFIG REQUIRED)
+find_package(Stb                           REQUIRED)
 
 # Executable
 # --------------------------------
@@ -41,6 +42,11 @@ add_executable(ImageQualityReference WIN32
     Source/Interface.cpp
     Source/Precompiled.cpp
 )
+
+# Compile Options
+# --------------------------------
+
+target_compile_options(ImageQualityReference PRIVATE /W4 /WX)
 
 # PCH
 # --------------------------------
@@ -72,6 +78,7 @@ target_link_libraries(ImageQualityReference PRIVATE
     TBB::tbb
     imgui::imgui
     implot::implot
+    unofficial::D3D12MemoryAllocator
     magic_enum::magic_enum
 )
 
