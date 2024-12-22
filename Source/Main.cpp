@@ -171,6 +171,9 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
     // Wait for adapter enumeration to complete.
     gTaskGroup.wait();
 
+    // We use glslang in case of shadertoy shader compilation to DXIL.
+    glslang::InitializeProcess();
+
     InitializeGraphicsRuntime();
 
     // Configure initial window size based on display-supplied resolutions.
@@ -200,6 +203,8 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
         gDXGISwapChain->SetFullscreenState(false, nullptr);
 
     Interface::Release();
+
+    glslang::FinalizeProcess();
 
     glfwDestroyWindow(gWindow);
     glfwTerminate();

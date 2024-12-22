@@ -15,6 +15,14 @@
 #include <DirectXMath.h>
 #include <wrl.h>
 
+#include <curl/curl.h>
+
+#include <glslang/SPIRV/GlslangToSpv.h>
+#include <glslang/SPIRV/disassemble.h>
+#include <glslang/SPIRV/SPVRemapper.h>
+#include <glslang/Public/ResourceLimits.h>
+#include <glslang/Public/ShaderLang.h>
+
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_dx12.h>
@@ -32,9 +40,17 @@
 
 #include <tbb/tbb.h>
 
+#include <nlohmann/json.hpp>
+
 #include <Windows.h>
 #include <format>
 #include <set>
+
+#include <microsoft/compiler/nir_to_dxil.h>
+#include <dxil_validator.h>
+#include <spirv/nir_spirv.h>
+#include <spirv_to_dxil.h>
+#include <dxil_spirv_nir.h>
 
 #include <SplashImageBytes.h>
 #include <Util.h>

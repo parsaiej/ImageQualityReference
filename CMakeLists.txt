@@ -31,6 +31,9 @@ find_package(magic_enum             CONFIG REQUIRED)
 find_package(glfw3                  CONFIG REQUIRED)
 find_package(TBB                    CONFIG REQUIRED)  
 find_package(d3d12-memory-allocator CONFIG REQUIRED)
+find_package(glslang                CONFIG REQUIRED)
+find_package(nlohmann_json          CONFIG REQUIRED)
+find_package(CURL                          REQUIRED)
 find_package(Stb                           REQUIRED)
 
 # Executable
@@ -56,11 +59,22 @@ target_precompile_headers(ImageQualityReference PRIVATE Source/Include/Precompil
 # Defines
 # --------------------------------
 
+add_definitions(-DHAVE_STRUCT_TIMESPEC)
+
 # Include
 # --------------------------------
 
 target_include_directories(ImageQualityReference BEFORE PRIVATE 
     Source/Include/
+    C:/Development/mesa/include
+    C:/Development/mesa/src
+    C:/Development/mesa/src/compiler/
+    C:/Development/mesa/src/compiler/nir
+    C:/Development/mesa/src/microsoft/compiler
+    C:/Development/mesa/src/microsoft/spirv_to_dxil
+    C:/Development/mesa/build/src/
+    C:/Development/mesa/build/src/compiler
+    C:/Development/mesa/build/src/compiler/nir
     $ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/include/
     $ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/include/d3dx12/
     ${Stb_INCLUDE_DIR}
@@ -75,11 +89,20 @@ target_link_libraries(ImageQualityReference PRIVATE
     dxgi
     d3d12
     glfw
+    CURL::libcurl
     TBB::tbb
     imgui::imgui
     implot::implot
     unofficial::D3D12MemoryAllocator
     magic_enum::magic_enum
+    glslang::glslang
+    glslang::glslang-default-resource-limits
+    glslang::SPIRV
+    nlohmann_json::nlohmann_json
+    synchronization.lib
+    ${CMAKE_SOURCE_DIR}/External/spirv-to-dxil/lib/${CMAKE_BUILD_TYPE}/libspirv_to_dxil.lib
+    ${CMAKE_SOURCE_DIR}/External/spirv-to-dxil/lib/${CMAKE_BUILD_TYPE}/libnir.lib
+    ${CMAKE_SOURCE_DIR}/External/spirv-to-dxil/lib/${CMAKE_BUILD_TYPE}/libdxil_compiler.lib
 )
 
 configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/D3D12Core.dll      D3D12/D3D12Core.dll      COPYONLY)

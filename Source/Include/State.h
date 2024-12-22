@@ -13,6 +13,7 @@ extern int                                    gSRVDescriptorSize;
 extern ComPtr<ID3D12Device>                   gLogicalDevice;
 extern ComPtr<IDSRDevice>                     gDSRDevice;
 extern ComPtr<ID3D12CommandQueue>             gCommandQueue;
+extern ComPtr<ID3D12PipelineState>            gGraphicsPipelineState;
 extern ComPtr<ID3D12DescriptorHeap>           gSwapChainDescriptorHeapRTV;
 extern ComPtr<ID3D12DescriptorHeap>           gImguiDescriptorHeapSRV;
 extern ComPtr<ID3D12CommandAllocator>         gCommandAllocator;

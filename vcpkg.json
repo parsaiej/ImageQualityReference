@@ -8,6 +8,9 @@
       "stb",
       "glfw3",
       "tbb",
+      "curl",
+      "glslang",
+      "nlohmann-json",
       "d3d12-memory-allocator"
     ]
   }
