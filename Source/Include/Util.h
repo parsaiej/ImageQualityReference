@@ -1,6 +1,8 @@
 #ifndef UTIL_H
 #define UTIL_H
 
+// ---------------------------
+
 enum WindowMode
 {
     Windowed,
@@ -23,6 +25,8 @@ enum UpdateFlags : uint32_t
     GraphicsRuntime   = 1 << 3
 };
 
+// ---------------------------
+
 class StopWatch
 {
 public:
@@ -35,6 +39,8 @@ private:
 
     std::chrono::time_point<std::chrono::steady_clock> mPrevTime;
 };
+
+// ---------------------------
 
 class ScrollingBuffer
 {
@@ -50,6 +56,8 @@ public:
     int              mOffset;
     ImVector<ImVec2> mData;
 };
+
+// ---------------------------
 
 class MovingAverage
 {
@@ -69,6 +77,45 @@ private:
     int    mIndex;
     float* mValues;
 };
+
+// ---------------------------
+
+struct XMINT2Cmp
+{
+    bool operator()(const DirectX::XMINT2& lhs, const DirectX::XMINT2& rhs) const
+    {
+        if (lhs.x != rhs.x)
+            return lhs.x < rhs.x;
+        return lhs.y < rhs.y;
+    }
+};
+
+struct RefreshRateCmp
+{
+    bool operator()(const DXGI_RATIONAL& lhs, const DXGI_RATIONAL& rhs) const
+    {
+        return lhs.Numerator * rhs.Denominator < rhs.Numerator * lhs.Denominator;
+    }
+};
+
+// ---------------------------
+
+class D3DMemoryLeakReport
+{
+public:
+
+    ~D3DMemoryLeakReport()
+    {
+        IDXGIDebug1* dxgiDebug;
+        if (FAILED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug))))
+            return;
+
+        dxgiDebug->ReportLiveObjects(DXGI_DEBUG_ALL, static_cast<DXGI_DEBUG_RLO_FLAGS>(DXGI_DEBUG_RLO_IGNORE_INTERNAL | DXGI_DEBUG_RLO_DETAIL));
+        dxgiDebug->Release();
+    }
+};
+
+// ---------------------------
 
 inline std::string HrToString(HRESULT hr)
 {
@@ -96,6 +143,8 @@ inline void ThrowIfFailed(HRESULT hr)
         throw HrException(hr);
     }
 }
+
+// ---------------------------
 
 inline std::string FromWideStr(std::wstring wstr)
 {
@@ -134,7 +183,7 @@ inline bool StringListDropdown(const char* name, const std::vector<std::string>&
 
     if (ImGui::BeginCombo(name, strings[selectedIndex].c_str()))
     {
-        for (int i = 0; i < strings.size(); i++)
+        for (int i = 0; i < static_cast<int>(strings.size()); i++)
         {
             if (ImGui::Selectable(strings[i].c_str(), selectedIndex == i))
             {
@@ -173,37 +222,17 @@ inline void SetDebugName(IDXGIObject* obj, const wchar_t* name)
         obj->SetPrivateData(WKPDID_D3DDebugObjectNameW, static_cast<UINT>(wcslen(name) * sizeof(wchar_t)), name);
 }
 
-struct XMINT2Cmp
-{
-    bool operator()(const DirectX::XMINT2& lhs, const DirectX::XMINT2& rhs) const
-    {
-        if (lhs.x != rhs.x)
-            return lhs.x < rhs.x;
-        return lhs.y < rhs.y;
-    }
-};
+// ---------------------------
 
-struct RefreshRateCmp
-{
-    bool operator()(const DXGI_RATIONAL& lhs, const DXGI_RATIONAL& rhs) const
-    {
-        return lhs.Numerator * rhs.Denominator < rhs.Numerator * lhs.Denominator;
-    }
-};
+bool ReadFileBytes(const std::string& filename, std::vector<uint8_t>& data);
 
-class D3DMemoryLeakReport
-{
-public:
+// Query URL and return result in a string (empty it failed).
+std::string QueryURL(const std::string& url);
 
-    ~D3DMemoryLeakReport()
-    {
-        IDXGIDebug1* dxgiDebug;
-        if (FAILED(DXGIGetDebugInterface1(0, IID_PPV_ARGS(&dxgiDebug))))
-            return;
+// Compile GLSL to SPIR-V using glslang (empty if failed).
+std::vector<uint32_t> CompileGLSLToSPIRV(const char** sources, int sourceCount, EShLanguage stage);
 
-        dxgiDebug->ReportLiveObjects(DXGI_DEBUG_ALL, static_cast<DXGI_DEBUG_RLO_FLAGS>(DXGI_DEBUG_RLO_IGNORE_INTERNAL | DXGI_DEBUG_RLO_DETAIL));
-        dxgiDebug->Release();
-    }
-};
+// Cross compiles a SPIR-V module to DXIL.
+bool CrossCompileSPIRVToDXIL(const std::string& entryPoint, const std::vector<uint32_t>& spirv, std::vector<uint8_t>& dxil);
 
 #endif

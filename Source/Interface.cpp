@@ -1,6 +1,7 @@
 #include <Interface.h>
 #include <State.h>
 #include <OverlayStyle.h>
+#include <Util.h>
 
 void Interface::Create()
 {
@@ -44,13 +45,6 @@ void Interface::Release()
     ImGui::DestroyContext();
 }
 
-auto WriteData(void* contents, size_t size, size_t nmemb, std::string* userp)
-{
-    size_t totalSize = size * nmemb;
-    userp->append(static_cast<char*>(contents), totalSize);
-    return totalSize;
-};
-
 constexpr const char* kVertexShaderInputs = R"(
 
     // TODO    
@@ -90,68 +84,12 @@ constexpr const char* kFragmentShaderMainInvocation = R"(
 
 )";
 
-// Function to compile GLSL to SPIR-V using glslang
-std::vector<uint32_t> CompileGLSLToSPIRV(const std::string& source, EShLanguage stage)
-{
-    (void)source;
-
-    glslang::TShader shader(stage);
-    const char*      shaderStrings[3] = { kFragmentShaderShaderToyInputs, source.c_str(), kFragmentShaderMainInvocation };
-
-    shader.setStrings(shaderStrings, 3);
-    shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_3);
-    shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_1);
-
-    if (!shader.parse(GetDefaultResources(), 450, true, EShMsgEnhanced))
-    {
-        spdlog::error("GLSL Compilation Failed:\n\n{}", shader.getInfoLog());
-        return {};
-    }
-
-    glslang::TProgram program;
-    program.addShader(&shader);
-
-    if (!program.link(EShMsgDefault))
-    {
-        spdlog::error("Program Linking Failed:\n\n{}", program.getInfoLog());
-        return {};
-    }
-
-    std::vector<uint32_t> spirv;
-    glslang::GlslangToSpv(*program.getIntermediate(stage), spirv);
-
-    return spirv;
-}
-
 void ShaderToyShaderRequest(const std::string& url)
 {
     // 1) Download the shader toy shader.
     // -----------------------------------
 
-    CURL*    curl;
-    CURLcode result;
-
-    std::string data;
-
-    curl_global_init(CURL_GLOBAL_DEFAULT);
-    curl = curl_easy_init();
-
-    if (!curl)
-        return;
-
-    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteData);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &data);
-    result = curl_easy_perform(curl);
-
-    if (result != CURLE_OK)
-    {
-        spdlog::error("Failed to download shader toy shader: {}", curl_easy_strerror(result));
-        return;
-    }
-
-    curl_easy_cleanup(curl);
-    curl_global_cleanup();
+    auto data = QueryURL(url);
 
     // 2) Parse result into JSON.
     // --------------------------
@@ -167,69 +105,32 @@ void ShaderToyShaderRequest(const std::string& url)
         return;
     }
 
-    auto spirv = CompileGLSLToSPIRV(parsedData["Shader"]["renderpass"][0]["code"].get<std::string>(), EShLangFragment);
+    // For now, grab the first render pass.
+    auto shaderToySource = parsedData["Shader"]["renderpass"][0]["code"].get<std::string>();
 
-    if (spirv.empty())
+    // Compose a GLSL shader that makes the ShaderToy shader Vulkan-conformant.
+    const char* shaderStrings[3] = { kFragmentShaderShaderToyInputs, shaderToySource.c_str(), kFragmentShaderMainInvocation };
+
+    auto shaderToyFragmentShaderSPIRV = CompileGLSLToSPIRV(shaderStrings, 3, EShLangFragment);
+
+    if (shaderToyFragmentShaderSPIRV.empty())
         return;
 
     // 4) Convert SPIR-V to DXIL.
     // --------------------------
 
-    dxil_spirv_debug_options debug_opts = {};
-    {
-        debug_opts.dump_nir = false;
-    }
-
-    struct dxil_spirv_runtime_conf conf;
-    memset(&conf, 0, sizeof(conf));
-    conf.runtime_data_cbv.base_shader_register  = 0;
-    conf.runtime_data_cbv.register_space        = 0;
-    conf.push_constant_cbv.base_shader_register = 0;
-    conf.push_constant_cbv.register_space       = 0;
-    conf.first_vertex_and_base_instance_mode    = DXIL_SPIRV_SYSVAL_TYPE_ZERO;
-    conf.declared_read_only_images_as_srvs      = true;
-    conf.shader_model_max                       = SHADER_MODEL_6_0;
-
-    dxil_spirv_logger logger = {};
-    logger.log               = [](void*, const char* msg) { spdlog::info("{}", msg); };
-
-    dxil_spirv_object dxil;
-
-    if (!spirv_to_dxil(spirv.data(),
-                       spirv.size(),
-                       nullptr,
-                       0,
-                       DXIL_SPIRV_SHADER_FRAGMENT,
-                       "main",
-                       DXIL_VALIDATOR_1_6,
-                       &debug_opts,
-                       &conf,
-                       &logger,
-                       &dxil))
+    std::vector<uint8_t> shaderToyFragmentShaderDXIL;
+    if (!CrossCompileSPIRVToDXIL("main", shaderToyFragmentShaderSPIRV, shaderToyFragmentShaderDXIL))
         spdlog::error("Failed to convert SPIR-V to DXIL.");
 
-    spdlog::error("Successfully converted SPIR-V to DXIL.");
-
-    // 5) Load vertex shader DXIL.
+    // 5) Load our matching fullscreen triangle vertex shader DXIL.
     // ---------------------------
 
     std::string vertexShaderPath = "C:\\Development\\ImageQualityReference\\Assets\\Shaders\\Compiled\\FullscreenTriangle.vert.dxil";
 
-    std::ifstream file(vertexShaderPath, std::ios::binary | std::ios::ate);
-
-    if (!file)
-        throw std::runtime_error("Failed to open file: " + vertexShaderPath);
-
-    // Determine the file size
-    std::streamsize fileSize = file.tellg();
-    file.seekg(0, std::ios::beg);
-
-    // Create a buffer to hold the file content
-    std::vector<char> buffer(fileSize);
-
-    // Read the file into the buffer
-    if (!file.read(buffer.data(), fileSize))
-        throw std::runtime_error("Failed to read file: " + vertexShaderPath);
+    std::vector<uint8_t> fullscreenTriangleVertexShaderDXIL;
+    if (!ReadFileBytes(vertexShaderPath, fullscreenTriangleVertexShaderDXIL))
+        return;
 
     // 5) Create Graphics PSO.
     // --------------------------
@@ -269,8 +170,8 @@ void ShaderToyShaderRequest(const std::string& url)
 
     D3D12_GRAPHICS_PIPELINE_STATE_DESC shaderToyPSOInfo = {};
     {
-        shaderToyPSOInfo.PS                                = { dxil.binary.buffer, dxil.binary.size };
-        shaderToyPSOInfo.VS                                = { buffer.data(), buffer.size() };
+        shaderToyPSOInfo.PS                                = { shaderToyFragmentShaderDXIL.data(), shaderToyFragmentShaderDXIL.size() };
+        shaderToyPSOInfo.VS                                = { fullscreenTriangleVertexShaderDXIL.data(), fullscreenTriangleVertexShaderDXIL.size() };
         shaderToyPSOInfo.RasterizerState.FillMode          = D3D12_FILL_MODE_SOLID;
         shaderToyPSOInfo.RasterizerState.CullMode          = D3D12_CULL_MODE_NONE;
         shaderToyPSOInfo.RasterizerState.MultisampleEnable = FALSE;
@@ -282,10 +183,9 @@ void ShaderToyShaderRequest(const std::string& url)
         shaderToyPSOInfo.pRootSignature                    = pShaderToyPSORootSignature.Get();
     }
 
+    // Compile the PSO in the driver.
     ComPtr<ID3D12PipelineState> shaderToyPSO;
     ThrowIfFailed(gLogicalDevice->CreateGraphicsPipelineState(&shaderToyPSOInfo, IID_PPV_ARGS(&shaderToyPSO)));
-
-    spirv_to_dxil_free(&dxil);
 }
 
 void Interface::Draw()
