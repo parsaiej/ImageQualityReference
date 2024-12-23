@@ -45,12 +45,9 @@
 #include <Windows.h>
 #include <format>
 #include <set>
+#include <fstream>
 
-#include <microsoft/compiler/nir_to_dxil.h>
-#include <dxil_validator.h>
-#include <spirv/nir_spirv.h>
 #include <spirv_to_dxil.h>
-#include <dxil_spirv_nir.h>
 
 #include <SplashImageBytes.h>
 #include <Util.h>

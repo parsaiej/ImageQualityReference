@@ -51,7 +51,13 @@ auto WriteData(void* contents, size_t size, size_t nmemb, std::string* userp)
     return totalSize;
 };
 
-constexpr const char* kShaderShaderToyInputs = R"(
+constexpr const char* kVertexShaderInputs = R"(
+
+    // TODO    
+
+)";
+
+constexpr const char* kFragmentShaderShaderToyInputs = R"(
 
 layout (set = 0, binding = 0) uniform UBO
 {
@@ -72,16 +78,14 @@ layout (set = 0, binding = 0) uniform UBO
 
 )";
 
-constexpr const char* kShaderMainInvocation = R"(
+constexpr const char* kFragmentShaderMainInvocation = R"(
 
-
-    layout (location = 0) in  vec2 fragCoordIn;
-    layout (location = 1) out vec4 fragColorOut;
+    layout (location = 0) out vec4 fragColorOut;
 
     void main()
     {
         // Invoke the ShaderToy shader.
-        mainImage(fragColorOut, fragCoordIn);
+        mainImage(fragColorOut, vec2(0, 0));
     }
 
 )";
@@ -92,10 +96,9 @@ std::vector<uint32_t> CompileGLSLToSPIRV(const std::string& source, EShLanguage 
     (void)source;
 
     glslang::TShader shader(stage);
-    const char*      shaderStrings[3] = { kShaderShaderToyInputs, source.c_str(), kShaderMainInvocation };
+    const char*      shaderStrings[3] = { kFragmentShaderShaderToyInputs, source.c_str(), kFragmentShaderMainInvocation };
 
     shader.setStrings(shaderStrings, 3);
-    shader.setEnvInputVulkanRulesRelaxed();
     shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_3);
     shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_1);
 
@@ -172,8 +175,6 @@ void ShaderToyShaderRequest(const std::string& url)
     // 4) Convert SPIR-V to DXIL.
     // --------------------------
 
-    glsl_type_singleton_init_or_ref();
-
     dxil_spirv_debug_options debug_opts = {};
     {
         debug_opts.dump_nir = false;
@@ -182,9 +183,9 @@ void ShaderToyShaderRequest(const std::string& url)
     struct dxil_spirv_runtime_conf conf;
     memset(&conf, 0, sizeof(conf));
     conf.runtime_data_cbv.base_shader_register  = 0;
-    conf.runtime_data_cbv.register_space        = 31;
+    conf.runtime_data_cbv.register_space        = 0;
     conf.push_constant_cbv.base_shader_register = 0;
-    conf.push_constant_cbv.register_space       = 30;
+    conf.push_constant_cbv.register_space       = 0;
     conf.first_vertex_and_base_instance_mode    = DXIL_SPIRV_SYSVAL_TYPE_ZERO;
     conf.declared_read_only_images_as_srvs      = true;
     conf.shader_model_max                       = SHADER_MODEL_6_0;
@@ -208,6 +209,81 @@ void ShaderToyShaderRequest(const std::string& url)
         spdlog::error("Failed to convert SPIR-V to DXIL.");
 
     spdlog::error("Successfully converted SPIR-V to DXIL.");
+
+    // 5) Load vertex shader DXIL.
+    // ---------------------------
+
+    std::string vertexShaderPath = "C:\\Development\\ImageQualityReference\\Assets\\Shaders\\Compiled\\FullscreenTriangle.vert.dxil";
+
+    std::ifstream file(vertexShaderPath, std::ios::binary | std::ios::ate);
+
+    if (!file)
+        throw std::runtime_error("Failed to open file: " + vertexShaderPath);
+
+    // Determine the file size
+    std::streamsize fileSize = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    // Create a buffer to hold the file content
+    std::vector<char> buffer(fileSize);
+
+    // Read the file into the buffer
+    if (!file.read(buffer.data(), fileSize))
+        throw std::runtime_error("Failed to read file: " + vertexShaderPath);
+
+    // 5) Create Graphics PSO.
+    // --------------------------
+
+    std::vector<D3D12_ROOT_PARAMETER> rootParameters;
+    {
+        D3D12_ROOT_PARAMETER rootParameter      = {};
+        rootParameter.ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
+        rootParameter.Descriptor.RegisterSpace  = 0;
+        rootParameter.Descriptor.ShaderRegister = 0;
+        rootParameter.ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
+
+        rootParameters.push_back(rootParameter);
+    }
+
+    D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc = {};
+
+    rootSignatureDesc.Version                = D3D_ROOT_SIGNATURE_VERSION_1_0;
+    rootSignatureDesc.Desc_1_0.NumParameters = static_cast<UINT>(rootParameters.size());
+    rootSignatureDesc.Desc_1_0.pParameters   = rootParameters.data();
+
+    ComPtr<ID3DBlob> pBlobSignature;
+    ComPtr<ID3DBlob> pBlobError;
+    if (FAILED(D3D12SerializeVersionedRootSignature(&rootSignatureDesc, &pBlobSignature, &pBlobError)))
+    {
+        if (pBlobError)
+            spdlog::error((static_cast<char*>(pBlobError->GetBufferPointer())));
+
+        return;
+    }
+
+    ComPtr<ID3D12RootSignature> pShaderToyPSORootSignature;
+    ThrowIfFailed(gLogicalDevice->CreateRootSignature(0,
+                                                      pBlobSignature->GetBufferPointer(),
+                                                      pBlobSignature->GetBufferSize(),
+                                                      IID_PPV_ARGS(&pShaderToyPSORootSignature)));
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC shaderToyPSOInfo = {};
+    {
+        shaderToyPSOInfo.PS                                = { dxil.binary.buffer, dxil.binary.size };
+        shaderToyPSOInfo.VS                                = { buffer.data(), buffer.size() };
+        shaderToyPSOInfo.RasterizerState.FillMode          = D3D12_FILL_MODE_SOLID;
+        shaderToyPSOInfo.RasterizerState.CullMode          = D3D12_CULL_MODE_NONE;
+        shaderToyPSOInfo.RasterizerState.MultisampleEnable = FALSE;
+        shaderToyPSOInfo.PrimitiveTopologyType             = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        shaderToyPSOInfo.SampleMask                        = UINT_MAX;
+        shaderToyPSOInfo.NumRenderTargets                  = 1;
+        shaderToyPSOInfo.RTVFormats[0]                     = DXGI_FORMAT_R8G8B8A8_UNORM;
+        shaderToyPSOInfo.SampleDesc.Count                  = 1;
+        shaderToyPSOInfo.pRootSignature                    = pShaderToyPSORootSignature.Get();
+    }
+
+    ComPtr<ID3D12PipelineState> shaderToyPSO;
+    ThrowIfFailed(gLogicalDevice->CreateGraphicsPipelineState(&shaderToyPSOInfo, IID_PPV_ARGS(&shaderToyPSO)));
 
     spirv_to_dxil_free(&dxil);
 }

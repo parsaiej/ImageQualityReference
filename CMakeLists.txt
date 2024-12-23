@@ -66,15 +66,7 @@ add_definitions(-DHAVE_STRUCT_TIMESPEC)
 
 target_include_directories(ImageQualityReference BEFORE PRIVATE 
     Source/Include/
-    C:/Development/mesa/include
-    C:/Development/mesa/src
-    C:/Development/mesa/src/compiler/
-    C:/Development/mesa/src/compiler/nir
-    C:/Development/mesa/src/microsoft/compiler
-    C:/Development/mesa/src/microsoft/spirv_to_dxil
-    C:/Development/mesa/build/src/
-    C:/Development/mesa/build/src/compiler
-    C:/Development/mesa/build/src/compiler/nir
+    External/spirv-to-dxil/include
     $ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/include/
     $ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/include/d3dx12/
     ${Stb_INCLUDE_DIR}
@@ -101,7 +93,6 @@ target_link_libraries(ImageQualityReference PRIVATE
     nlohmann_json::nlohmann_json
     synchronization.lib
     ${CMAKE_SOURCE_DIR}/External/spirv-to-dxil/lib/${CMAKE_BUILD_TYPE}/libspirv_to_dxil.lib
-    ${CMAKE_SOURCE_DIR}/External/spirv-to-dxil/lib/${CMAKE_BUILD_TYPE}/libnir.lib
     ${CMAKE_SOURCE_DIR}/External/spirv-to-dxil/lib/${CMAKE_BUILD_TYPE}/libdxil_compiler.lib
 )
 

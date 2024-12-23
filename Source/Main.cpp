@@ -593,6 +593,13 @@ void InitializeGraphicsRuntime()
     }
 #endif
 
+    if (FAILED(D3D12EnableExperimentalFeatures(1, &D3D12ExperimentalShaderModels, NULL, NULL)))
+    {
+        spdlog::warn(
+            "Failed to enable experimental shader models. This may happen if Windows Developer Mode is disabled. Shader Toy shaders will not "
+            "compile.");
+    }
+
     ThrowIfFailed(D3D12CreateDevice(gDXGIAdapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&gLogicalDevice)));
 
     // Describe and create the command queue.
@@ -601,24 +608,27 @@ void InitializeGraphicsRuntime()
     queueDesc.Type                     = D3D12_COMMAND_LIST_TYPE_DIRECT;
     ThrowIfFailed(gLogicalDevice->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&gCommandQueue)));
 
+    // Determine the size of descriptor type stride.
+    gRTVDescriptorSize = gLogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+    gSRVDescriptorSize = gLogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
     // Descriptor heaps.
     // ------------------------------------------
 
     {
+        // Dedicated descriptor heap for swap chain images.
         D3D12_DESCRIPTOR_HEAP_DESC swapChainBufferDescriptorHeapDescRTV = {};
         swapChainBufferDescriptorHeapDescRTV.NumDescriptors             = 16; // Allocate the likely max swap chain images we will ever encounter.
         swapChainBufferDescriptorHeapDescRTV.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
         swapChainBufferDescriptorHeapDescRTV.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
         ThrowIfFailed(gLogicalDevice->CreateDescriptorHeap(&swapChainBufferDescriptorHeapDescRTV, IID_PPV_ARGS(&gSwapChainDescriptorHeapRTV)));
 
+        // Dedicated descriptor heap for imgui shader resource.
         D3D12_DESCRIPTOR_HEAP_DESC imguiDescriptorHeapDescSRV = {};
         imguiDescriptorHeapDescSRV.NumDescriptors             = 1;
         imguiDescriptorHeapDescSRV.Type                       = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
         imguiDescriptorHeapDescSRV.Flags                      = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
         ThrowIfFailed(gLogicalDevice->CreateDescriptorHeap(&imguiDescriptorHeapDescSRV, IID_PPV_ARGS(&gImguiDescriptorHeapSRV)));
-
-        gRTVDescriptorSize = gLogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
-        gSRVDescriptorSize = gLogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     }
 
     // ------------------------------------------
