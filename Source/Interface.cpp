@@ -51,28 +51,37 @@ auto WriteData(void* contents, size_t size, size_t nmemb, std::string* userp)
     return totalSize;
 };
 
-constexpr const char* kShaderInputs = R"(
+constexpr const char* kShaderShaderToyInputs = R"(
 
-uniform vec3      iResolution;           // viewport resolution (in pixels)
-uniform float     iTime;                 // shader playback time (in seconds)
-uniform float     iTimeDelta;            // render time (in seconds)
-uniform float     iFrameRate;            // shader frame rate
-uniform int       iFrame;                // shader playback frame
-uniform float     iChannelTime[4];       // channel playback time (in seconds)
-uniform vec3      iChannelResolution[4]; // channel resolution (in pixels)
-uniform vec4      iMouse;                // mouse pixel coords. xy: current (if MLB down), zw: click
-uniform vec4      iDate;                 // (year, month, day, time in seconds)
-uniform float     iSampleRate;           // sound sample rate (i.e., 44100)
+layout (set = 0, binding = 0) uniform UBO
+{
+    // Constant buffer adapted from ShaderToy inputs.
+
+    vec3      iResolution;           // viewport resolution (in pixels)
+    float     iTime;                 // shader playback time (in seconds)
+    float     iTimeDelta;            // render time (in seconds)
+    float     iFrameRate;            // shader frame rate
+    int       iFrame;                // shader playback frame
+    float     iChannelTime[4];       // channel playback time (in seconds)
+    vec3      iChannelResolution[4]; // channel resolution (in pixels)
+    vec4      iMouse;                // mouse pixel coords. xy: current (if MLB down), zw: click
+    vec4      iDate;                 // (year, month, day, time in seconds)
+    float     iSampleRate;           // sound sample rate (i.e., 44100)
+
+};
 
 )";
 
-constexpr const char* kTestShader = R"(
+constexpr const char* kShaderMainInvocation = R"(
 
-    out vec4 fragColor;
+
+    layout (location = 0) in  vec2 fragCoordIn;
+    layout (location = 1) out vec4 fragColorOut;
 
     void main()
     {
-        mainImage(fragColor, gl_FragCoord.xy);
+        // Invoke the ShaderToy shader.
+        mainImage(fragColorOut, fragCoordIn);
     }
 
 )";
@@ -83,11 +92,11 @@ std::vector<uint32_t> CompileGLSLToSPIRV(const std::string& source, EShLanguage 
     (void)source;
 
     glslang::TShader shader(stage);
-    const char*      shaderStrings[3] = { kShaderInputs, source.c_str(), kTestShader };
+    const char*      shaderStrings[3] = { kShaderShaderToyInputs, source.c_str(), kShaderMainInvocation };
 
     shader.setStrings(shaderStrings, 3);
     shader.setEnvInputVulkanRulesRelaxed();
-    shader.setEnvClient(glslang::EShClientOpenGL, glslang::EShTargetOpenGL_450);
+    shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_3);
     shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_1);
 
     if (!shader.parse(GetDefaultResources(), 450, true, EShMsgEnhanced))
@@ -156,6 +165,9 @@ void ShaderToyShaderRequest(const std::string& url)
     }
 
     auto spirv = CompileGLSLToSPIRV(parsedData["Shader"]["renderpass"][0]["code"].get<std::string>(), EShLangFragment);
+
+    if (spirv.empty())
+        return;
 
     // 4) Convert SPIR-V to DXIL.
     // --------------------------
