@@ -114,25 +114,7 @@ void Interface::Draw()
     if (ImGui::CollapsingHeader("Input", ImGuiTreeNodeFlags_DefaultOpen))
     {
         if (EnumDropdown<RenderInputMode>("Input Mode", reinterpret_cast<int*>(&gRenderInputMode)) || gRenderInput == nullptr)
-        {
-            if (gRenderInput)
-                gRenderInput->Release();
-
-            switch (gRenderInputMode)
-            {
-                case RenderInputMode::ShaderToy:
-                {
-                    gRenderInput = std::make_unique<RenderInputShaderToy>();
-                    break;
-                }
-
-                case RenderInputMode::OpenUSD:
-                {
-                    gRenderInput = nullptr;
-                    break;
-                }
-            }
-        }
+            gUpdateFlags |= UpdateFlags::RenderInputChanged;
 
         if (gRenderInput)
             gRenderInput->RenderInterface();
@@ -204,7 +186,7 @@ void Interface::Draw()
     {
         ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, 0x0);
         ImPlot::SetupAxisLimits(ImAxis_X1, elapsedTime - history, elapsedTime, ImGuiCond_Always);
-        ImPlot::SetupAxisLimits(ImAxis_Y1, 0, gDeltaTimeMovingAverage.GetAverage() * 2.0, ImGuiCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, gDeltaTimeMovingAverage.GetAverage() * 0.5, gDeltaTimeMovingAverage.GetAverage() * 1.5, ImGuiCond_Always);
 
         ImPlot::SetNextLineStyle(IMPLOT_AUTO_COL, 1.0);
 

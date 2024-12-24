@@ -10,6 +10,14 @@ namespace ICR
     {
     public:
 
+        enum AsyncCompileShaderToyStatus
+        {
+            Idle,
+            Compiling,
+            Compiled,
+            Failed
+        };
+
         struct Constants
         {
             DirectX::XMFLOAT4 iAppViewport;
@@ -39,14 +47,15 @@ namespace ICR
 
     private:
 
-        std::string mURL;
-
-        ComPtr<ID3D12PipelineState>  mPSO;
-        ComPtr<D3D12MA::Allocation>  mUBOAllocation;
-        ComPtr<ID3D12DescriptorHeap> mUBOHeap;
-        ComPtr<ID3D12Resource>       mUBO;
-        void*                        mpUBOData;
-        ComPtr<ID3D12RootSignature>  mRootSignature;
+        std::string                              mURL;
+        bool                                     mInitialized = false;
+        ComPtr<ID3D12PipelineState>              mPSO;
+        ComPtr<D3D12MA::Allocation>              mUBOAllocation;
+        ComPtr<ID3D12DescriptorHeap>             mUBOHeap;
+        ComPtr<ID3D12Resource>                   mUBO;
+        void*                                    mpUBOData;
+        ComPtr<ID3D12RootSignature>              mRootSignature;
+        std::atomic<AsyncCompileShaderToyStatus> mAsyncCompileStatus;
     };
 } // namespace ICR
 

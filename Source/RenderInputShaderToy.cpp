@@ -10,6 +10,19 @@ namespace ICR
         // Initialize the shadertoy to a known-good one.
         mURL = "https://www.shadertoy.com/api/v1/shaders///Xds3zN?key=BtrjRM";
 
+        // Initial async compile state.
+        mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Idle);
+    }
+
+    RenderInputShaderToy::~RenderInputShaderToy() {}
+
+    void CompileShaderToyToGraphicsPSO(const std::string& url, ID3D12RootSignature** ppRootSignature, ID3D12PipelineState** ppPSO);
+
+    void RenderInputShaderToy::Initialize()
+    {
+        if (mInitialized)
+            return;
+
         //  Resources
         // ---------------------------
 
@@ -62,11 +75,23 @@ namespace ICR
             constantBufferViewDesc.SizeInBytes    = sizeof(Constants);
         }
         gLogicalDevice->CreateConstantBufferView(&constantBufferViewDesc, mUBOHeap->GetCPUDescriptorHandleForHeapStart());
+
+        // Re-load PSO
+        if (!mURL.empty())
+        {
+            gTaskGroup.run(
+                [&]()
+                {
+                    mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Compiling);
+
+                    CompileShaderToyToGraphicsPSO(mURL, &mRootSignature, &mPSO);
+
+                    mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Compiled);
+                });
+        }
+
+        mInitialized = true;
     }
-
-    RenderInputShaderToy::~RenderInputShaderToy() {}
-
-    void RenderInputShaderToy::Initialize() {}
 
     constexpr const char* kFragmentShaderShaderToyInputs = R"(
 
@@ -89,7 +114,6 @@ namespace ICR
 
             // Pad-up to 256 bytes.
             float padding[28];
-            
         };
 
     )";
@@ -238,7 +262,17 @@ namespace ICR
             ImGui::SameLine();
 
             if (ImGui::Button("Load"))
-                CompileShaderToyToGraphicsPSO(mURL, &mRootSignature, &mPSO);
+            {
+                gTaskGroup.run(
+                    [&]()
+                    {
+                        mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Compiling);
+
+                        CompileShaderToyToGraphicsPSO(mURL, &mRootSignature, &mPSO);
+
+                        mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Compiled);
+                    });
+            }
         }
 
         ImGui::EndChild();
@@ -246,8 +280,17 @@ namespace ICR
 
     void RenderInputShaderToy::Render(const FrameParams& frameParams)
     {
-        if (!mPSO)
+        if (!mInitialized)
             return;
+
+        // Check PSO compile status.
+        switch (mAsyncCompileStatus.load())
+        {
+            case AsyncCompileShaderToyStatus::Compiling:
+            case AsyncCompileShaderToyStatus::Failed:
+            case AsyncCompileShaderToyStatus::Idle     : return;
+            default                                    : break;
+        };
 
         // Hack a viewport
         D3D12_VIEWPORT viewport = {};
@@ -296,6 +339,19 @@ namespace ICR
         frameParams.pCmd->DrawInstanced(3U, 1U, 0U, 0U);
     }
 
-    void RenderInputShaderToy::Release() { mUBO->Unmap(0, nullptr); }
+    void RenderInputShaderToy::Release()
+    {
+        if (!mInitialized)
+            return;
+
+        mUBO->Unmap(0, nullptr);
+        mUBOAllocation.Reset();
+        mUBO.Reset();
+        mUBOHeap.Reset();
+        mRootSignature.Reset();
+        mPSO.Reset();
+
+        mInitialized = false;
+    }
 
 } // namespace ICR

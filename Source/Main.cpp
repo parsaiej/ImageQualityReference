@@ -6,6 +6,7 @@ extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\
 
 #include <Util.h>
 #include <RenderInput.h>
+#include <RenderInputShaderToy.h>
 #include <Interface.h>
 
 using namespace ICR;
@@ -565,6 +566,9 @@ void EnumerateDisplayModes()
 
 void InitializeGraphicsRuntime()
 {
+    if (gRenderInput)
+        gRenderInput->Release();
+
     UINT dxgiFactoryFlags = 0;
 
 #ifdef _DEBUG
@@ -733,6 +737,9 @@ void InitializeGraphicsRuntime()
         spdlog::info("Device: {}", gDXGIAdapterNames[gDXGIAdapterIndex]);
         spdlog::info("VRAM:   {} GB", gDXGIAdapterInfos[gDXGIAdapterIndex].DedicatedVideoMemory / static_cast<float>(1024 * 1024 * 1024));
     }
+
+    if (gRenderInput)
+        gRenderInput->Initialize();
 }
 
 void SyncSettings()
@@ -773,6 +780,29 @@ void SyncSettings()
         WaitForDevice();
 
         UpdateWindowAndSwapChain();
+    }
+
+    if ((gUpdateFlags & UpdateFlags::RenderInputChanged) != 0)
+    {
+        if (gRenderInput)
+            gRenderInput->Release();
+
+        switch (gRenderInputMode)
+        {
+            case RenderInputMode::ShaderToy:
+            {
+                gRenderInput = std::make_unique<RenderInputShaderToy>();
+                break;
+            }
+
+            case RenderInputMode::OpenUSD:
+            {
+                gRenderInput = nullptr;
+                break;
+            }
+        }
+
+        gRenderInput->Initialize();
     }
 
     // Clear update flags.

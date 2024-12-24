@@ -20,11 +20,12 @@ namespace ICR
 
     enum UpdateFlags : uint32_t
     {
-        None              = 0,
-        Window            = 1 << 0,
-        SwapChainRecreate = 1 << 1,
-        SwapChainResize   = 1 << 2,
-        GraphicsRuntime   = 1 << 3
+        None               = 0,
+        Window             = 1 << 0,
+        SwapChainRecreate  = 1 << 1,
+        SwapChainResize    = 1 << 2,
+        GraphicsRuntime    = 1 << 3,
+        RenderInputChanged = 1 << 4
     };
 
     // ---------------------------
