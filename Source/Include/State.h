@@ -64,6 +64,7 @@ namespace ICR
     extern tbb::task_group                        gTaskGroup;
     extern RenderInputMode                        gRenderInputMode;
     extern std::unique_ptr<RenderInput>           gRenderInput;
+    extern ComPtr<D3D12MA::Allocator>             gMemoryAllocator;
 
 } // namespace ICR
 

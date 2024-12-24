@@ -8,7 +8,60 @@ namespace ICR
     RenderInputShaderToy::RenderInputShaderToy() : mURL(256, '\0')
     {
         // Initialize the shadertoy to a known-good one.
-        mURL = "https://www.shadertoy.com/api/v1/shaders/MfVfz3?key=BtrjRM";
+        mURL = "https://www.shadertoy.com/api/v1/shaders/Xds3zN?key=BtrjRM";
+
+        //  Resources
+        // ---------------------------
+
+        D3D12_RESOURCE_DESC shaderToyUBO = {};
+        {
+            shaderToyUBO.Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER;
+            shaderToyUBO.Alignment          = 0;
+            shaderToyUBO.Width              = sizeof(Constants);
+            shaderToyUBO.Height             = 1;
+            shaderToyUBO.DepthOrArraySize   = 1;
+            shaderToyUBO.MipLevels          = 1;
+            shaderToyUBO.Format             = DXGI_FORMAT_UNKNOWN;
+            shaderToyUBO.SampleDesc.Count   = 1;
+            shaderToyUBO.SampleDesc.Quality = 0;
+            shaderToyUBO.Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+            shaderToyUBO.Flags              = D3D12_RESOURCE_FLAG_NONE;
+        }
+
+        D3D12MA::ALLOCATION_DESC shaderToyUBOAllocDesc = {};
+        {
+            shaderToyUBOAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
+        }
+
+        ThrowIfFailed(gMemoryAllocator->CreateResource(&shaderToyUBOAllocDesc,
+                                                       &shaderToyUBO,
+                                                       D3D12_RESOURCE_STATE_GENERIC_READ,
+                                                       nullptr,
+                                                       mUBOAllocation.GetAddressOf(),
+                                                       IID_PPV_ARGS(mUBO.GetAddressOf())));
+
+        ThrowIfFailed(mUBO->Map(0, nullptr, &mpUBOData));
+
+        // Descriptor heaps.
+        // ---------------------------
+
+        D3D12_DESCRIPTOR_HEAP_DESC constantBufferViewHeapDesc = {};
+        {
+            constantBufferViewHeapDesc.NumDescriptors = 1;
+            constantBufferViewHeapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+            constantBufferViewHeapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        }
+        ThrowIfFailed(gLogicalDevice->CreateDescriptorHeap(&constantBufferViewHeapDesc, IID_PPV_ARGS(&mUBOHeap)));
+
+        // Resource views
+        // ---------------------------
+
+        D3D12_CONSTANT_BUFFER_VIEW_DESC constantBufferViewDesc = {};
+        {
+            constantBufferViewDesc.BufferLocation = mUBO->GetGPUVirtualAddress();
+            constantBufferViewDesc.SizeInBytes    = sizeof(Constants);
+        }
+        gLogicalDevice->CreateConstantBufferView(&constantBufferViewDesc, mUBOHeap->GetCPUDescriptorHandleForHeapStart());
     }
 
     RenderInputShaderToy::~RenderInputShaderToy() {}
@@ -32,6 +85,9 @@ namespace ICR
             vec4      iDate;                 // (year, month, day, time in seconds)
             float     iSampleRate;           // sound sample rate (i.e., 44100)
 
+            // Pad-up to 256 bytes.
+            float padding[32];
+            
         };
 
     )";
@@ -43,9 +99,7 @@ namespace ICR
         void main()
         {
             // Invoke the ShaderToy shader.
-            mainImage(fragColorOut, gl_FragCoord.xy);
-
-            fragColorOut = vec4(gl_FragCoord.xy / vec2(1920.0, 1440.0), 0.0, 1.0);
+            mainImage(fragColorOut, vec2(gl_FragCoord.x, iResolution.y - gl_FragCoord.y));
         }
 
     )";
@@ -188,6 +242,23 @@ namespace ICR
         if (!mPSO)
             return;
 
+        static float totalElapsed = 0;
+        static int   frameIndex   = 0;
+
+        Constants constants = {};
+        {
+            constants.iResolution.x = 1920.0f * 0.75f;
+            constants.iResolution.y = 1440.0f * 0.75f;
+            constants.iTime         = totalElapsed;
+            constants.iTimeDelta    = gDeltaTime;
+            constants.iFrame        = frameIndex;
+            constants.iFrameRate    = 1.0f / gDeltaTime;
+        }
+        memcpy(mpUBOData, &constants, sizeof(Constants));
+
+        totalElapsed += gDeltaTime;
+        frameIndex++;
+
         // Hack a viewport
         D3D12_VIEWPORT viewport = {};
         {
@@ -207,14 +278,16 @@ namespace ICR
             scissor.bottom = static_cast<LONG>(1440);
         }
 
+        frameParams.pCmd->SetGraphicsRootSignature(mRootSignature.Get());
+        frameParams.pCmd->SetDescriptorHeaps(1U, mUBOHeap.GetAddressOf());
+        frameParams.pCmd->SetGraphicsRootConstantBufferView(0u, mUBO->GetGPUVirtualAddress());
         frameParams.pCmd->RSSetScissorRects(1U, &scissor);
         frameParams.pCmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         frameParams.pCmd->RSSetViewports(1U, &viewport);
-        frameParams.pCmd->SetGraphicsRootSignature(mRootSignature.Get());
         frameParams.pCmd->SetPipelineState(mPSO.Get());
         frameParams.pCmd->DrawInstanced(3U, 1U, 0U, 0U);
     }
 
-    void RenderInputShaderToy::Release() {}
+    void RenderInputShaderToy::Release() { mUBO->Unmap(0, nullptr); }
 
 } // namespace ICR

@@ -15,6 +15,8 @@
 #include <DirectXMath.h>
 #include <wrl.h>
 
+#include <D3D12MemAlloc.h>
+
 #include <curl/curl.h>
 
 #include <glslang/SPIRV/GlslangToSpv.h>

@@ -147,10 +147,6 @@ namespace ICR
         shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_3);
         shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_1);
 
-#if defined(_DEBUG)
-        shader.setDebugInfo(true);
-#endif
-
         if (!shader.parse(GetDefaultResources(), 450, true, EShMsgEnhanced))
         {
             spdlog::error("GLSL Compilation Failed:\n\n{}", shader.getInfoLog());
@@ -167,14 +163,7 @@ namespace ICR
         }
 
         std::vector<uint32_t> spirv;
-
-        glslang::SpvOptions spvOptions;
-
-#if defined(_DEBUG)
-        spvOptions.generateDebugInfo = true;
-#endif
-
-        glslang::GlslangToSpv(*program.getIntermediate(stage), spirv, &spvOptions);
+        glslang::GlslangToSpv(*program.getIntermediate(stage), spirv);
 
         return spirv;
     }

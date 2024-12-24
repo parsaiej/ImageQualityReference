@@ -40,6 +40,7 @@ namespace ICR
     ComPtr<ID3D12DescriptorHeap>      gImguiDescriptorHeapSRV     = nullptr;
     ComPtr<ID3D12CommandAllocator>    gCommandAllocator           = nullptr;
     ComPtr<ID3D12GraphicsCommandList> gCommandList                = nullptr;
+    ComPtr<D3D12MA::Allocator>        gMemoryAllocator            = nullptr;
 
     std::vector<ComPtr<ID3D12Resource>> gSwapChainImages;
     uint32_t                            gSwapChainImageCount = 2;
@@ -213,6 +214,9 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
         gDXGISwapChain->SetFullscreenState(false, nullptr);
 
     Interface::Release();
+
+    if (gRenderInput)
+        gRenderInput->Release();
 
     glslang::FinalizeProcess();
 
@@ -611,6 +615,14 @@ void InitializeGraphicsRuntime()
     }
 
     ThrowIfFailed(D3D12CreateDevice(gDXGIAdapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&gLogicalDevice)));
+
+    D3D12MA::ALLOCATOR_DESC memoryAllocatorDesc = {};
+    {
+        memoryAllocatorDesc.pDevice  = gLogicalDevice.Get();
+        memoryAllocatorDesc.pAdapter = gDXGIAdapter.Get();
+        memoryAllocatorDesc.Flags    = D3D12MA::ALLOCATOR_FLAG_MSAA_TEXTURES_ALWAYS_COMMITTED | D3D12MA::ALLOCATOR_FLAG_DEFAULT_POOLS_NOT_ZEROED;
+    }
+    ThrowIfFailed(D3D12MA::CreateAllocator(&memoryAllocatorDesc, &gMemoryAllocator));
 
     // Describe and create the command queue.
     D3D12_COMMAND_QUEUE_DESC queueDesc = {};
