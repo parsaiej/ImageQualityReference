@@ -803,15 +803,8 @@ void Render()
 
     // Clear the overlay ui region.
     {
-        const float clearColor[]   = { 1.0f, 1.0f, 1.0f, 1.0f };
-        D3D12_RECT  clearColorRect = { 0, 0, static_cast<LONG>(0.25L * gBackBufferSize.x), gBackBufferSize.y };
-        gCommandList->ClearRenderTargetView(currentSwapChainBufferRTV, clearColor, 1, &clearColorRect);
-    }
-
-    // CLear the normal rendering viewport region.
-    {
-        const float clearColor[]   = { 0.2f, 0.2f, 0.75f, 1.0f };
-        D3D12_RECT  clearColorRect = { static_cast<LONG>(0.25L * gBackBufferSize.x), 0, gBackBufferSize.x, gBackBufferSize.y };
+        const float clearColor[]   = { 0.0f, 0.0f, 0.0f, 0.0f };
+        D3D12_RECT  clearColorRect = { 0, 0, gBackBufferSize.x, gBackBufferSize.y };
         gCommandList->ClearRenderTargetView(currentSwapChainBufferRTV, clearColor, 1, &clearColorRect);
     }
 

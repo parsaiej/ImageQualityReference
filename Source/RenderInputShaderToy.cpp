@@ -8,7 +8,7 @@ namespace ICR
     RenderInputShaderToy::RenderInputShaderToy() : mURL(256, '\0')
     {
         // Initialize the shadertoy to a known-good one.
-        mURL = "https://www.shadertoy.com/api/v1/shaders/Xds3zN?key=BtrjRM";
+        mURL = "https://www.shadertoy.com/api/v1/shaders///Xds3zN?key=BtrjRM";
 
         //  Resources
         // ---------------------------
@@ -72,8 +72,10 @@ namespace ICR
 
         layout (set = 0, binding = 0) uniform UBO
         {
-            // Constant buffer adapted from ShaderToy inputs.
+            // Add some application-specific inputs.
+            vec4 iAppViewport;
 
+            // Constant buffer adapted from ShaderToy inputs.
             vec3      iResolution;           // viewport resolution (in pixels)
             float     iTime;                 // shader playback time (in seconds)
             float     iTimeDelta;            // render time (in seconds)
@@ -86,7 +88,7 @@ namespace ICR
             float     iSampleRate;           // sound sample rate (i.e., 44100)
 
             // Pad-up to 256 bytes.
-            float padding[32];
+            float padding[28];
             
         };
 
@@ -98,8 +100,13 @@ namespace ICR
 
         void main()
         {
+            vec2 fragCoordViewport = gl_FragCoord.xy;
+
+            fragCoordViewport.x -= iAppViewport.x;
+            fragCoordViewport.y  = iResolution.y - fragCoordViewport.y;
+
             // Invoke the ShaderToy shader.
-            mainImage(fragColorOut, vec2(gl_FragCoord.x, iResolution.y - gl_FragCoord.y));
+            mainImage(fragColorOut, fragCoordViewport);
         }
 
     )";
@@ -242,41 +249,42 @@ namespace ICR
         if (!mPSO)
             return;
 
-        static float totalElapsed = 0;
-        static int   frameIndex   = 0;
-
-        Constants constants = {};
-        {
-            constants.iResolution.x = 1920.0f * 0.75f;
-            constants.iResolution.y = 1440.0f * 0.75f;
-            constants.iTime         = totalElapsed;
-            constants.iTimeDelta    = gDeltaTime;
-            constants.iFrame        = frameIndex;
-            constants.iFrameRate    = 1.0f / gDeltaTime;
-        }
-        memcpy(mpUBOData, &constants, sizeof(Constants));
-
-        totalElapsed += gDeltaTime;
-        frameIndex++;
-
         // Hack a viewport
         D3D12_VIEWPORT viewport = {};
         {
-            viewport.TopLeftX = 1920 * 0.25f;
+            viewport.TopLeftX = gBackBufferSize.x * 0.25f;
             viewport.TopLeftY = 0;
-            viewport.Width    = 1920 * 0.75f;
-            viewport.Height   = 1440 * 0.75f;
+            viewport.Width    = gBackBufferSize.x * 0.75f;
+            viewport.Height   = gBackBufferSize.y * 0.75f;
             viewport.MinDepth = 0.0f;
             viewport.MaxDepth = 1.0f;
         }
 
         D3D12_RECT scissor = {};
         {
-            scissor.left   = static_cast<LONG>(viewport.TopLeftX);
-            scissor.top    = static_cast<LONG>(viewport.TopLeftY);
-            scissor.right  = static_cast<LONG>(1920);
-            scissor.bottom = static_cast<LONG>(1440);
+            scissor.left   = static_cast<LONG>(0);
+            scissor.top    = static_cast<LONG>(0);
+            scissor.right  = static_cast<LONG>(gBackBufferSize.x);
+            scissor.bottom = static_cast<LONG>(gBackBufferSize.y);
         }
+
+        static float totalElapsed = 0;
+        static int   frameIndex   = 0;
+
+        Constants constants = {};
+        {
+            constants.iResolution.x = gBackBufferSize.x * 0.75f;
+            constants.iResolution.y = gBackBufferSize.y * 0.75f;
+            constants.iTime         = totalElapsed;
+            constants.iTimeDelta    = gDeltaTime;
+            constants.iFrame        = frameIndex;
+            constants.iFrameRate    = 1.0f / gDeltaTime;
+            constants.iAppViewport  = { viewport.TopLeftX, viewport.TopLeftY, viewport.Width, viewport.Height };
+        }
+        memcpy(mpUBOData, &constants, sizeof(Constants));
+
+        totalElapsed += gDeltaTime;
+        frameIndex++;
 
         frameParams.pCmd->SetGraphicsRootSignature(mRootSignature.Get());
         frameParams.pCmd->SetDescriptorHeaps(1U, mUBOHeap.GetAddressOf());

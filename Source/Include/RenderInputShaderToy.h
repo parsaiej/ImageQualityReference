@@ -12,6 +12,8 @@ namespace ICR
 
         struct Constants
         {
+            DirectX::XMFLOAT4 iAppViewport;
+
             DirectX::XMFLOAT3 iResolution;
             float             iTime;
             float             iTimeDelta;
@@ -24,7 +26,7 @@ namespace ICR
             float             iSampleRate;
 
             // Pad-up to 256 bytes.
-            float padding[32];
+            float padding[28];
         };
 
         RenderInputShaderToy();
