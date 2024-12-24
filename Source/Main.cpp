@@ -169,6 +169,7 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
     {
         glfwInit();
 
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
         gWindow = glfwCreateWindow(gBackBufferSize.x, gBackBufferSize.y, "Image Clarity Reference", nullptr, nullptr);
@@ -352,7 +353,6 @@ void UpdateWindowAndSwapChain()
         default: break;
     }
 
-    // Handle DXGI / GLFW changes.
     switch (gWindowMode)
     {
         case WindowMode::Windowed:
@@ -451,7 +451,6 @@ void UpdateWindowAndSwapChain()
                                                 swapChainInfo.BufferDesc.Format,
                                                 swapChainInfo.Flags));
 
-    // Reset the swap chain image index.
     gCurrentSwapChainImageIndex = gDXGISwapChain->GetCurrentBackBufferIndex();
 
     CD3DX12_CPU_DESCRIPTOR_HANDLE swapChainBufferRTV(gSwapChainDescriptorHeapRTV->GetCPUDescriptorHandleForHeapStart());
