@@ -44,6 +44,7 @@ add_executable(ImageQualityReference WIN32
     Source/Util.cpp
     Source/Interface.cpp
     Source/Precompiled.cpp
+    Source/RenderInputShaderToy.cpp
 )
 
 # Compile Options

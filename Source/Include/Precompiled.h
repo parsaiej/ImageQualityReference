@@ -50,7 +50,6 @@
 #include <spirv_to_dxil.h>
 
 #include <SplashImageBytes.h>
-#include <Util.h>
 
 using namespace Microsoft::WRL;
 

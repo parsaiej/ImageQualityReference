@@ -2,6 +2,9 @@
 #include <State.h>
 #include <OverlayStyle.h>
 #include <Util.h>
+#include <RenderInputShaderToy.h>
+
+using namespace ICR;
 
 void Interface::Create()
 {
@@ -45,154 +48,14 @@ void Interface::Release()
     ImGui::DestroyContext();
 }
 
-constexpr const char* kVertexShaderInputs = R"(
-
-    // TODO    
-
-)";
-
-constexpr const char* kFragmentShaderShaderToyInputs = R"(
-
-layout (set = 0, binding = 0) uniform UBO
-{
-    // Constant buffer adapted from ShaderToy inputs.
-
-    vec3      iResolution;           // viewport resolution (in pixels)
-    float     iTime;                 // shader playback time (in seconds)
-    float     iTimeDelta;            // render time (in seconds)
-    float     iFrameRate;            // shader frame rate
-    int       iFrame;                // shader playback frame
-    float     iChannelTime[4];       // channel playback time (in seconds)
-    vec3      iChannelResolution[4]; // channel resolution (in pixels)
-    vec4      iMouse;                // mouse pixel coords. xy: current (if MLB down), zw: click
-    vec4      iDate;                 // (year, month, day, time in seconds)
-    float     iSampleRate;           // sound sample rate (i.e., 44100)
-
-};
-
-)";
-
-constexpr const char* kFragmentShaderMainInvocation = R"(
-
-    layout (location = 0) out vec4 fragColorOut;
-
-    void main()
-    {
-        // Invoke the ShaderToy shader.
-        mainImage(fragColorOut, vec2(0, 0));
-    }
-
-)";
-
-void ShaderToyShaderRequest(const std::string& url)
-{
-    // 1) Download the shader toy shader.
-    // -----------------------------------
-
-    auto data = QueryURL(url);
-
-    // 2) Parse result into JSON.
-    // --------------------------
-
-    nlohmann::json parsedData = nlohmann::json::parse(data);
-
-    // 3) Compile GLSL to SPIR-V.
-    // ---------------------------
-
-    if (parsedData.contains("Error"))
-    {
-        spdlog::info("Requested shader is not publically available via API.");
-        return;
-    }
-
-    // For now, grab the first render pass.
-    auto shaderToySource = parsedData["Shader"]["renderpass"][0]["code"].get<std::string>();
-
-    // Compose a GLSL shader that makes the ShaderToy shader Vulkan-conformant.
-    const char* shaderStrings[3] = { kFragmentShaderShaderToyInputs, shaderToySource.c_str(), kFragmentShaderMainInvocation };
-
-    auto shaderToyFragmentShaderSPIRV = CompileGLSLToSPIRV(shaderStrings, 3, EShLangFragment);
-
-    if (shaderToyFragmentShaderSPIRV.empty())
-        return;
-
-    // 4) Convert SPIR-V to DXIL.
-    // --------------------------
-
-    std::vector<uint8_t> shaderToyFragmentShaderDXIL;
-    if (!CrossCompileSPIRVToDXIL("main", shaderToyFragmentShaderSPIRV, shaderToyFragmentShaderDXIL))
-        spdlog::error("Failed to convert SPIR-V to DXIL.");
-
-    // 5) Load our matching fullscreen triangle vertex shader DXIL.
-    // ---------------------------
-
-    std::string vertexShaderPath = "C:\\Development\\ImageQualityReference\\Assets\\Shaders\\Compiled\\FullscreenTriangle.vert.dxil";
-
-    std::vector<uint8_t> fullscreenTriangleVertexShaderDXIL;
-    if (!ReadFileBytes(vertexShaderPath, fullscreenTriangleVertexShaderDXIL))
-        return;
-
-    // 5) Create Graphics PSO.
-    // --------------------------
-
-    std::vector<D3D12_ROOT_PARAMETER> rootParameters;
-    {
-        D3D12_ROOT_PARAMETER rootParameter      = {};
-        rootParameter.ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
-        rootParameter.Descriptor.RegisterSpace  = 0;
-        rootParameter.Descriptor.ShaderRegister = 0;
-        rootParameter.ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
-
-        rootParameters.push_back(rootParameter);
-    }
-
-    D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc = {};
-
-    rootSignatureDesc.Version                = D3D_ROOT_SIGNATURE_VERSION_1_0;
-    rootSignatureDesc.Desc_1_0.NumParameters = static_cast<UINT>(rootParameters.size());
-    rootSignatureDesc.Desc_1_0.pParameters   = rootParameters.data();
-
-    ComPtr<ID3DBlob> pBlobSignature;
-    ComPtr<ID3DBlob> pBlobError;
-    if (FAILED(D3D12SerializeVersionedRootSignature(&rootSignatureDesc, &pBlobSignature, &pBlobError)))
-    {
-        if (pBlobError)
-            spdlog::error((static_cast<char*>(pBlobError->GetBufferPointer())));
-
-        return;
-    }
-
-    ComPtr<ID3D12RootSignature> pShaderToyPSORootSignature;
-    ThrowIfFailed(gLogicalDevice->CreateRootSignature(0,
-                                                      pBlobSignature->GetBufferPointer(),
-                                                      pBlobSignature->GetBufferSize(),
-                                                      IID_PPV_ARGS(&pShaderToyPSORootSignature)));
-
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC shaderToyPSOInfo = {};
-    {
-        shaderToyPSOInfo.PS                                = { shaderToyFragmentShaderDXIL.data(), shaderToyFragmentShaderDXIL.size() };
-        shaderToyPSOInfo.VS                                = { fullscreenTriangleVertexShaderDXIL.data(), fullscreenTriangleVertexShaderDXIL.size() };
-        shaderToyPSOInfo.RasterizerState.FillMode          = D3D12_FILL_MODE_SOLID;
-        shaderToyPSOInfo.RasterizerState.CullMode          = D3D12_CULL_MODE_NONE;
-        shaderToyPSOInfo.RasterizerState.MultisampleEnable = FALSE;
-        shaderToyPSOInfo.PrimitiveTopologyType             = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-        shaderToyPSOInfo.SampleMask                        = UINT_MAX;
-        shaderToyPSOInfo.NumRenderTargets                  = 1;
-        shaderToyPSOInfo.RTVFormats[0]                     = DXGI_FORMAT_R8G8B8A8_UNORM;
-        shaderToyPSOInfo.SampleDesc.Count                  = 1;
-        shaderToyPSOInfo.pRootSignature                    = pShaderToyPSORootSignature.Get();
-    }
-
-    // Compile the PSO in the driver.
-    ComPtr<ID3D12PipelineState> shaderToyPSO;
-    ThrowIfFailed(gLogicalDevice->CreateGraphicsPipelineState(&shaderToyPSOInfo, IID_PPV_ARGS(&shaderToyPSO)));
-}
-
 void Interface::Draw()
 {
     ImGui_ImplDX12_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
+
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.1f, 0.1f, 0.1f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.8f, 0.8f, 0.8f, 1.0f));
 
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImVec2((float)gBackBufferSize.x * 0.25f, (float)gBackBufferSize.y));
@@ -219,9 +82,6 @@ void Interface::Draw()
             gUpdateFlags |= UpdateFlags::SwapChainResize;
 
         ImGui::EndDisabled();
-
-        if (ImGui::Button("Download Shader"))
-            ShaderToyShaderRequest("https://www.shadertoy.com/api/v1/shaders/MfVfz3?key=BtrjRM");
 
         if (StringListDropdown("Adapter", gDXGIAdapterNames, gDXGIAdapterIndex))
             gUpdateFlags |= UpdateFlags::GraphicsRuntime;
@@ -251,9 +111,31 @@ void Interface::Draw()
             StringListDropdown("DirectSR Algorithm", { "None" }, gDSRVariantIndex);
     }
 
-    if (ImGui::CollapsingHeader("Analysis", ImGuiTreeNodeFlags_DefaultOpen))
+    if (ImGui::CollapsingHeader("Input", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        ImGui::Text("TODO");
+        if (EnumDropdown<RenderInputMode>("Input Mode", reinterpret_cast<int*>(&gRenderInputMode)) || gRenderInput == nullptr)
+        {
+            if (gRenderInput)
+                gRenderInput->Release();
+
+            switch (gRenderInputMode)
+            {
+                case RenderInputMode::ShaderToy:
+                {
+                    gRenderInput = std::make_unique<RenderInputShaderToy>();
+                    break;
+                }
+
+                case RenderInputMode::OpenUSD:
+                {
+                    gRenderInput = nullptr;
+                    break;
+                }
+            }
+        }
+
+        if (gRenderInput)
+            gRenderInput->RenderInterface();
     }
 
     static int selectedPerformanceGraphMode;
@@ -267,13 +149,9 @@ void Interface::Draw()
 
     if (ImGui::CollapsingHeader("Log", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.1f, 0.1f, 0.1f, 1.0f));
-        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.8f, 0.8f, 0.8f, 1.0f));
 
         if (ImGui::BeginChild("##LogChild", ImVec2(0, 200), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar))
         {
-            // ImGui::TextUnformatted(gLoggerMemory->str().c_str());
-
             ImGui::InputTextMultiline("##LogChild",
                                       const_cast<char*>(gLoggerMemory->str().c_str()),
                                       gLoggerMemory->str().size() + 1,
@@ -284,8 +162,6 @@ void Interface::Draw()
                 ImGui::SetScrollHereY(1.0F);
         }
         ImGui::EndChild();
-
-        ImGui::PopStyleColor(2);
     }
 
     ImGui::PopItemWidth();
@@ -364,6 +240,8 @@ void Interface::Draw()
 
         ImPlot::EndPlot();
     }
+
+    ImGui::PopStyleColor(2);
 
     ImGui::End();
 
