@@ -193,8 +193,26 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
     // Configure initial window size based on display-supplied resolutions.
     // -----------------------------------------
     {
-        // Select a somewhat large initial resolution size from the list.
-        gDXGIDisplayResolutionsIndex = std::max(0, static_cast<int>(gDXGIDisplayResolutions.size()) - 4);
+        constexpr DirectX::XMINT2 kTargetInitialResolution { 1280, 720 };
+
+        gDXGIDisplayResolutionsIndex = -1;
+
+        // Select a resolution that matches a target one.
+        for (int resolutionIndex = 0; resolutionIndex < static_cast<int>(gDXGIDisplayResolutions.size()); resolutionIndex++)
+        {
+            if (gDXGIDisplayResolutions[resolutionIndex].x == kTargetInitialResolution.x &&
+                gDXGIDisplayResolutions[resolutionIndex].y == kTargetInitialResolution.y)
+            {
+                gDXGIDisplayResolutionsIndex = resolutionIndex;
+                break;
+            }
+        }
+
+        if (gDXGIDisplayResolutionsIndex < 0)
+        {
+            // Select a somewhat large initial resolution size from the list.
+            gDXGIDisplayResolutionsIndex = std::max(0, static_cast<int>(gDXGIDisplayResolutions.size()) - 4);
+        }
 
         gBackBufferSize = gDXGIDisplayResolutions[gDXGIDisplayResolutionsIndex];
 
@@ -419,7 +437,6 @@ void UpdateWindowAndSwapChain()
         }
     }
 
-    // Update the viewport size.
     gViewport = {};
     {
         gViewport.TopLeftX = gBackBufferSize.x * 0.25f;
