@@ -100,6 +100,7 @@ namespace ICR
     // Output (post-upscaled) viewport resolution.
     DirectX::XMINT2 gBackBufferSize { 1280, 720 };
     DirectX::XMINT2 gBackBufferSizePrev { 1280, 720 };
+    D3D12_VIEWPORT  gViewport;
 
     // Cached window rect if going from fullscreen -> window.
     RECT gWindowRect;
@@ -416,6 +417,17 @@ void UpdateWindowAndSwapChain()
             gBackBufferSize              = gDXGIDisplayResolutions[gDXGIDisplayResolutionsIndex];
             break;
         }
+    }
+
+    // Update the viewport size.
+    gViewport = {};
+    {
+        gViewport.TopLeftX = gBackBufferSize.x * 0.25f;
+        gViewport.TopLeftY = 0;
+        gViewport.Width    = gBackBufferSize.x * 0.75f;
+        gViewport.Height   = gBackBufferSize.y * 0.75f;
+        gViewport.MinDepth = 0.0f;
+        gViewport.MaxDepth = 1.0f;
     }
 
     spdlog::info("Modify Swap Chain ({}x{} --> {}x{} @ {} Hz)",
@@ -802,7 +814,8 @@ void SyncSettings()
             }
         }
 
-        gRenderInput->Initialize();
+        if (gRenderInput)
+            gRenderInput->Initialize();
     }
 
     // Clear update flags.

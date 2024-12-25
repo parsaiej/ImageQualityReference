@@ -58,6 +58,7 @@ namespace ICR
     extern uint32_t                               gUpdateFlags;
     extern DirectX::XMINT2                        gBackBufferSize;
     extern DirectX::XMINT2                        gBackBufferSizePrev;
+    extern D3D12_VIEWPORT                         gViewport;
     extern RECT                                   gWindowRect;
     extern UINT                                   gWindowStyle;
     extern StopWatch                              gStopWatch;

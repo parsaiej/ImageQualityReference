@@ -255,6 +255,17 @@ namespace ICR
 
     void RenderInputShaderToy::RenderInterface()
     {
+        if (mAsyncCompileStatus.load() == AsyncCompileShaderToyStatus::Compiling)
+        {
+            ImGui::SetNextWindowPos(ImVec2(gViewport.TopLeftX + (0.5f * gViewport.Width), gViewport.Height * 0.5f),
+                                    ImGuiCond_Always,
+                                    ImVec2(0.5f, 0.5f));
+
+            ImGui::Begin("##ShaderToyProgress", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoTitleBar);
+            ImGui::ProgressBar(-1.0f * (float)ImGui::GetTime(), ImVec2(0, 0), "Loading");
+            ImGui::End();
+        }
+
         if (ImGui::BeginChild("##ShaderToy", ImVec2(-1, 300), ImGuiChildFlags_Borders))
         {
             ImGui::InputText("URL", mURL.data(), mURL.size());
@@ -292,17 +303,6 @@ namespace ICR
             default                                    : break;
         };
 
-        // Hack a viewport
-        D3D12_VIEWPORT viewport = {};
-        {
-            viewport.TopLeftX = gBackBufferSize.x * 0.25f;
-            viewport.TopLeftY = 0;
-            viewport.Width    = gBackBufferSize.x * 0.75f;
-            viewport.Height   = gBackBufferSize.y * 0.75f;
-            viewport.MinDepth = 0.0f;
-            viewport.MaxDepth = 1.0f;
-        }
-
         D3D12_RECT scissor = {};
         {
             scissor.left   = static_cast<LONG>(0);
@@ -322,7 +322,7 @@ namespace ICR
             constants.iTimeDelta    = gDeltaTime;
             constants.iFrame        = frameIndex;
             constants.iFrameRate    = 1.0f / gDeltaTime;
-            constants.iAppViewport  = { viewport.TopLeftX, viewport.TopLeftY, viewport.Width, viewport.Height };
+            constants.iAppViewport  = { gViewport.TopLeftX, gViewport.TopLeftY, gViewport.Width, gViewport.Height };
         }
         memcpy(mpUBOData, &constants, sizeof(Constants));
 
@@ -334,7 +334,7 @@ namespace ICR
         frameParams.pCmd->SetGraphicsRootConstantBufferView(0u, mUBO->GetGPUVirtualAddress());
         frameParams.pCmd->RSSetScissorRects(1U, &scissor);
         frameParams.pCmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        frameParams.pCmd->RSSetViewports(1U, &viewport);
+        frameParams.pCmd->RSSetViewports(1U, &gViewport);
         frameParams.pCmd->SetPipelineState(mPSO.Get());
         frameParams.pCmd->DrawInstanced(3U, 1U, 0U, 0U);
     }
