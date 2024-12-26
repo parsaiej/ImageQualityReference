@@ -69,6 +69,7 @@ namespace ICR
         void*                                    mpUBOData;
         ComPtr<ID3D12RootSignature>              mRootSignature;
         std::atomic<AsyncCompileShaderToyStatus> mAsyncCompileStatus;
+        bool                                     mUserRequestUnload;
     };
 } // namespace ICR
 

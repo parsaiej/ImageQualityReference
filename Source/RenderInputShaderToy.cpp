@@ -5,7 +5,7 @@
 namespace ICR
 {
 
-    RenderInputShaderToy::RenderInputShaderToy() : mShaderID(256, '\0')
+    RenderInputShaderToy::RenderInputShaderToy() : mShaderID(256, '\0'), mUserRequestUnload(false)
     {
         // Initialize the shadertoy to a known-good one.
         // "Raymarching - Primitives" https://www.shadertoy.com/view/Xds3zN
@@ -77,8 +77,11 @@ namespace ICR
         }
         gLogicalDevice->CreateConstantBufferView(&constantBufferViewDesc, mUBOHeap->GetCPUDescriptorHandleForHeapStart());
 
+        // Set am idle compile status before attempting anything.
+        mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Idle);
+
         // Re-load PSO
-        if (!mShaderID.empty())
+        if (!mShaderID.empty() && !mUserRequestUnload)
         {
             mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Compiling);
 
@@ -329,6 +332,18 @@ namespace ICR
                 gPreRenderTaskQueue.push(
                     [&]()
                     {
+                        mUserRequestUnload = false;
+                        Release();
+                        Initialize();
+                    });
+            }
+
+            if (ImGui::Button("Unload", ImVec2(ImGui::GetContentRegionAvail().x, 0)))
+            {
+                gPreRenderTaskQueue.push(
+                    [&]()
+                    {
+                        mUserRequestUnload = true;
                         Release();
                         Initialize();
                     });
