@@ -66,6 +66,7 @@ namespace ICR
     extern RenderInputMode                        gRenderInputMode;
     extern std::unique_ptr<RenderInput>           gRenderInput;
     extern ComPtr<D3D12MA::Allocator>             gMemoryAllocator;
+    extern std::queue<std::function<void()>>      gPreRenderTaskQueue;
 
 } // namespace ICR
 

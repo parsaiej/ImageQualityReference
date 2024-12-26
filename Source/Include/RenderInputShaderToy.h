@@ -18,6 +18,19 @@ namespace ICR
             Failed
         };
 
+        struct Buffer
+        {
+            ComPtr<ID3D12Resource>      resource;
+            ComPtr<D3D12MA::Allocation> allocation;
+        };
+
+        struct RenderPass
+        {
+            int                         output;
+            std::array<int, 4>          inputs;
+            ComPtr<ID3D12PipelineState> pso;
+        };
+
         struct Constants
         {
             DirectX::XMFLOAT4 iAppViewport;
@@ -47,12 +60,12 @@ namespace ICR
 
     private:
 
-        std::string                              mURL;
+        std::string                              mShaderID;
         bool                                     mInitialized = false;
         ComPtr<ID3D12PipelineState>              mPSO;
-        ComPtr<D3D12MA::Allocation>              mUBOAllocation;
-        ComPtr<ID3D12DescriptorHeap>             mUBOHeap;
         ComPtr<ID3D12Resource>                   mUBO;
+        ComPtr<ID3D12DescriptorHeap>             mUBOHeap;
+        ComPtr<D3D12MA::Allocation>              mUBOAllocation;
         void*                                    mpUBOData;
         ComPtr<ID3D12RootSignature>              mRootSignature;
         std::atomic<AsyncCompileShaderToyStatus> mAsyncCompileStatus;

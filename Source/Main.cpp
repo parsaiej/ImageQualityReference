@@ -112,6 +112,8 @@ namespace ICR
     RenderInputMode              gRenderInputMode = RenderInputMode::ShaderToy;
 
     tbb::task_group gTaskGroup;
+
+    std::queue<std::function<void()>> gPreRenderTaskQueue;
 } // namespace ICR
 
 // Utility Prototypes
@@ -842,6 +844,13 @@ void SyncSettings()
 void Render()
 {
     SyncSettings();
+
+    // Process pre-render tasks
+    while (!gPreRenderTaskQueue.empty())
+    {
+        gPreRenderTaskQueue.front()();
+        gPreRenderTaskQueue.pop();
+    }
 
     gStopWatch.Read(gDeltaTime);
 

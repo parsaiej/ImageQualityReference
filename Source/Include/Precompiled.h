@@ -41,6 +41,7 @@
 #include <stb_image.h>
 
 #include <tbb/tbb.h>
+#include <taskflow/taskflow.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -50,7 +51,6 @@
 #include <fstream>
 
 #include <spirv_to_dxil.h>
-
 #include <SplashImageBytes.h>
 
 using namespace Microsoft::WRL;

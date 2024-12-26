@@ -29,7 +29,8 @@ find_package(imgui                  CONFIG REQUIRED)
 find_package(implot                 CONFIG REQUIRED)
 find_package(magic_enum             CONFIG REQUIRED)
 find_package(glfw3                  CONFIG REQUIRED)
-find_package(TBB                    CONFIG REQUIRED)  
+find_package(TBB                    CONFIG REQUIRED) 
+find_package(Taskflow               CONFIG REQUIRED) 
 find_package(d3d12-memory-allocator CONFIG REQUIRED)
 find_package(glslang                CONFIG REQUIRED)
 find_package(nlohmann_json          CONFIG REQUIRED)
@@ -84,6 +85,7 @@ target_link_libraries(ImageQualityReference PRIVATE
     glfw
     CURL::libcurl
     TBB::tbb
+    Taskflow::Taskflow
     imgui::imgui
     implot::implot
     unofficial::D3D12MemoryAllocator
@@ -93,8 +95,7 @@ target_link_libraries(ImageQualityReference PRIVATE
     glslang::SPIRV
     nlohmann_json::nlohmann_json
     synchronization.lib
-    ${CMAKE_SOURCE_DIR}/External/spirv-to-dxil/lib/${CMAKE_BUILD_TYPE}/libspirv_to_dxil.lib
-    ${CMAKE_SOURCE_DIR}/External/spirv-to-dxil/lib/${CMAKE_BUILD_TYPE}/libdxil_compiler.lib
+    ${CMAKE_SOURCE_DIR}/External/spirv-to-dxil/lib/x64/${CMAKE_BUILD_TYPE}/libspirv_to_dxil.lib
 )
 
 configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/D3D12Core.dll      D3D12/D3D12Core.dll      COPYONLY)

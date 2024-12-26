@@ -134,16 +134,33 @@ void Interface::Draw()
 
         if (ImGui::BeginChild("##LogChild", ImVec2(0, 200), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar))
         {
+#if 1
+            ImGui::TextUnformatted(const_cast<char*>(gLoggerMemory->str().c_str()));
+#else
             ImGui::InputTextMultiline("##LogChild",
                                       const_cast<char*>(gLoggerMemory->str().c_str()),
                                       gLoggerMemory->str().size() + 1,
                                       ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 16),
                                       ImGuiInputTextFlags_ReadOnly);
+#endif
 
             if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
                 ImGui::SetScrollHereY(1.0F);
         }
         ImGui::EndChild();
+
+        if (ImGui::Button("Copy to Clipboard", ImVec2(ImGui::GetContentRegionAvail().x, 0)))
+        {
+            ImGui::LogToClipboard();
+            ImGui::LogText("%s", gLoggerMemory->str().c_str());
+            ImGui::LogFinish();
+        }
+
+        if (ImGui::Button("Clear", ImVec2(ImGui::GetContentRegionAvail().x, 0)))
+        {
+            gLoggerMemory->str("");
+            gLoggerMemory->clear();
+        }
     }
 
     ImGui::PopItemWidth();

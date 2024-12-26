@@ -5,10 +5,11 @@
 namespace ICR
 {
 
-    RenderInputShaderToy::RenderInputShaderToy() : mURL(256, '\0')
+    RenderInputShaderToy::RenderInputShaderToy() : mShaderID(256, '\0')
     {
         // Initialize the shadertoy to a known-good one.
-        mURL = "https://www.shadertoy.com/api/v1/shaders///Xds3zN?key=BtrjRM";
+        // "Raymarching - Primitives" https://www.shadertoy.com/view/Xds3zN
+        memcpy(mShaderID.data(), "Xds3zN", 6);
 
         // Initial async compile state.
         mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Idle);
@@ -16,7 +17,7 @@ namespace ICR
 
     RenderInputShaderToy::~RenderInputShaderToy() {}
 
-    void CompileShaderToyToGraphicsPSO(const std::string& url, ID3D12RootSignature** ppRootSignature, ID3D12PipelineState** ppPSO);
+    bool CompileShaderToyToGraphicsPSO(const std::string& shaderID, ID3D12RootSignature** ppRootSignature, ID3D12PipelineState** ppPSO);
 
     void RenderInputShaderToy::Initialize()
     {
@@ -77,16 +78,17 @@ namespace ICR
         gLogicalDevice->CreateConstantBufferView(&constantBufferViewDesc, mUBOHeap->GetCPUDescriptorHandleForHeapStart());
 
         // Re-load PSO
-        if (!mURL.empty())
+        if (!mShaderID.empty())
         {
+            mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Compiling);
+
             gTaskGroup.run(
                 [&]()
                 {
-                    mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Compiling);
-
-                    CompileShaderToyToGraphicsPSO(mURL, &mRootSignature, &mPSO);
-
-                    mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Compiled);
+                    if (CompileShaderToyToGraphicsPSO(mShaderID, &mRootSignature, &mPSO))
+                        mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Compiled);
+                    else
+                        mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Failed);
                 });
         }
 
@@ -135,17 +137,64 @@ namespace ICR
 
     )";
 
-    void CompileShaderToyToGraphicsPSO(const std::string& url, ID3D12RootSignature** ppRootSignature, ID3D12PipelineState** ppPSO)
+    void BuildRenderGraph(const nlohmann::json& parsedShaderToy)
+    {
+        tf::Taskflow renderGraph;
+
+        std::unordered_map<int, tf::Task> renderPassTasks;
+
+        auto ForEachRenderPass = [&](const std::function<void(const nlohmann::json&, const int&)>& func)
+        {
+            // Scan 1): Create a task for each render pass.
+            for (const auto& renderPass : parsedShaderToy["Shader"]["renderpass"])
+            {
+                int renderPassId;
+
+                if (renderPass["outputs"].empty())
+                {
+                    // Handle special case for the "Common" file.
+                    return; // renderPassId = -1;
+                }
+                else
+                {
+                    // Otherwise ShaderToy renderpasses only have one output.
+                    renderPassId = renderPass["outputs"][0]["id"].get<int>();
+                }
+
+                func(renderPass, renderPassId);
+            }
+        };
+
+        // Scan 1): Create a task for each render pass.
+        ForEachRenderPass([&](const nlohmann::json&, const int& id) { renderPassTasks[id] = renderGraph.emplace([id]() { spdlog::info(id); }); });
+
+        // Scan 2): Create dependencies between render passes.
+        ForEachRenderPass(
+            [&](const nlohmann::json& renderPass, const int& id)
+            {
+                for (const auto& input : renderPass["inputs"])
+                {
+                    renderPassTasks[input["id"]].precede(renderPassTasks[id]);
+                }
+            });
+
+        tf::Executor executor;
+
+        executor.run(renderGraph).wait();
+    }
+
+    bool CompileShaderToyToGraphicsPSO(const std::string& shaderID, ID3D12RootSignature** ppRootSignature, ID3D12PipelineState** ppPSO)
     {
         // 1) Download the shader toy shader.
         // -----------------------------------
-
-        auto data = QueryURL(url);
+        auto data = QueryURL("https://www.shadertoy.com/api/v1/shaders/" + shaderID.substr(0, 6) + "?key=BtrjRM");
 
         // 2) Parse result into JSON.
         // --------------------------
 
         nlohmann::json parsedData = nlohmann::json::parse(data);
+
+        spdlog::debug(parsedData.dump(4));
 
         // 3) Compile GLSL to SPIR-V.
         // ---------------------------
@@ -153,8 +202,11 @@ namespace ICR
         if (parsedData.contains("Error"))
         {
             spdlog::info("Requested shader is not publically available via API.");
-            return;
+            return false;
         }
+
+        // Build task-graph.
+        // BuildRenderGraph(parsedData);
 
         // For now, grab the first render pass.
         auto shaderToySource = parsedData["Shader"]["renderpass"][0]["code"].get<std::string>();
@@ -165,7 +217,7 @@ namespace ICR
         auto shaderToyFragmentShaderSPIRV = CompileGLSLToSPIRV(shaderStrings, 3, EShLangFragment);
 
         if (shaderToyFragmentShaderSPIRV.empty())
-            return;
+            return false;
 
         // 4) Convert SPIR-V to DXIL.
         // --------------------------
@@ -181,7 +233,7 @@ namespace ICR
 
         std::vector<uint8_t> fullscreenTriangleVertexShaderDXIL;
         if (!ReadFileBytes(vertexShaderPath, fullscreenTriangleVertexShaderDXIL))
-            return;
+            return false;
 
         // 5) Create Graphics PSO.
         // --------------------------
@@ -210,7 +262,7 @@ namespace ICR
             if (pBlobError)
                 spdlog::error((static_cast<char*>(pBlobError->GetBufferPointer())));
 
-            return;
+            return false;
         }
 
         ThrowIfFailed(gLogicalDevice->CreateRootSignature(0,
@@ -251,7 +303,11 @@ namespace ICR
 
         // Compile the PSO in the driver.
         ThrowIfFailed(gLogicalDevice->CreateGraphicsPipelineState(&shaderToyPSOInfo, IID_PPV_ARGS(ppPSO)));
+
+        return true;
     }
+
+    void ProcessShaderToyRequestAsync() {}
 
     void RenderInputShaderToy::RenderInterface()
     {
@@ -266,24 +322,28 @@ namespace ICR
             ImGui::End();
         }
 
-        if (ImGui::BeginChild("##ShaderToy", ImVec2(-1, 300), ImGuiChildFlags_Borders))
+        if (ImGui::BeginChild("##ShaderToy", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_Borders))
         {
-            ImGui::InputText("URL", mURL.data(), mURL.size());
+            ImGui::InputText("Shader ID", mShaderID.data(), mShaderID.size());
 
-            ImGui::SameLine();
-
-            if (ImGui::Button("Load"))
+            if (ImGui::Button("Load", ImVec2(ImGui::GetContentRegionAvail().x, 0)))
             {
-                gTaskGroup.run(
+                gPreRenderTaskQueue.push(
                     [&]()
                     {
-                        mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Compiling);
-
-                        CompileShaderToyToGraphicsPSO(mURL, &mRootSignature, &mPSO);
-
-                        mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Compiled);
+                        Release();
+                        Initialize();
                     });
             }
+
+            do
+            {
+                if (mAsyncCompileStatus.load() != AsyncCompileShaderToyStatus::Compiled)
+                    break;
+
+                if (ImGui::Button("Modify", ImVec2(ImGui::GetContentRegionAvail().x, 0))) {}
+            }
+            while (false);
         }
 
         ImGui::EndChild();
@@ -311,23 +371,23 @@ namespace ICR
             scissor.bottom = static_cast<LONG>(gBackBufferSize.y);
         }
 
-        static float totalElapsed = 0;
-        static int   frameIndex   = 0;
+        static float elapsedSeconds = 0;
+        static int   elapsedFrames  = 0;
 
         Constants constants = {};
         {
-            constants.iResolution.x = gBackBufferSize.x * 0.75f;
-            constants.iResolution.y = gBackBufferSize.y * 0.75f;
-            constants.iTime         = totalElapsed;
+            constants.iResolution.x = gViewport.Width;
+            constants.iResolution.y = gViewport.Height;
+            constants.iTime         = elapsedSeconds;
+            constants.iFrame        = elapsedFrames;
             constants.iTimeDelta    = gDeltaTime;
-            constants.iFrame        = frameIndex;
             constants.iFrameRate    = 1.0f / gDeltaTime;
             constants.iAppViewport  = { gViewport.TopLeftX, gViewport.TopLeftY, gViewport.Width, gViewport.Height };
         }
         memcpy(mpUBOData, &constants, sizeof(Constants));
 
-        totalElapsed += gDeltaTime;
-        frameIndex++;
+        elapsedSeconds += gDeltaTime;
+        elapsedFrames++;
 
         frameParams.pCmd->SetGraphicsRootSignature(mRootSignature.Get());
         frameParams.pCmd->SetDescriptorHeaps(1U, mUBOHeap.GetAddressOf());
