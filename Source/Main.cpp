@@ -388,14 +388,24 @@ void UpdateWindowAndSwapChain()
         case WindowMode::BorderlessFullscreen:
         {
             ThrowIfFailed(gDXGISwapChain->SetFullscreenState(false, nullptr));
+
+            DXGI_OUTPUT_DESC outputInfo;
+            gDXGIOutputs[gDXGIOutputsIndex]->GetDesc(&outputInfo);
+
             glfwSetWindowAttrib(gWindow, GLFW_DECORATED, GLFW_FALSE);
-            glfwSetWindowMonitor(gWindow, nullptr, 0, 0, gBackBufferSize.x, gBackBufferSize.y, 0);
+            glfwSetWindowMonitor(gWindow,
+                                 nullptr,
+                                 outputInfo.DesktopCoordinates.left,
+                                 outputInfo.DesktopCoordinates.top,
+                                 gBackBufferSize.x,
+                                 gBackBufferSize.y,
+                                 0);
             break;
         }
 
         case WindowMode::ExclusiveFullscreen:
         {
-            if (FAILED(gDXGISwapChain->SetFullscreenState(true, nullptr)))
+            if (FAILED(gDXGISwapChain->SetFullscreenState(true, gDXGIOutputs[gDXGIOutputsIndex].Get())))
             {
                 spdlog::info("Failed to go fullscreen. The adapter may not own the output display. Reverting to borderless.");
                 gWindowMode = WindowMode::BorderlessFullscreen;
