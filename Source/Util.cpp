@@ -105,15 +105,43 @@ namespace ICR
         return totalSize;
     };
 
+    class CurlInstance
+    {
+    public:
+
+        CurlInstance()
+        {
+            curl_global_init(CURL_GLOBAL_DEFAULT);
+            mpCurl = curl_easy_init();
+        }
+
+        ~CurlInstance()
+        {
+            if (mpCurl)
+                curl_easy_cleanup(mpCurl);
+
+            curl_global_cleanup();
+        }
+
+        inline CURL* Get() { return mpCurl; }
+
+    private:
+
+        CURL* mpCurl;
+    };
+
+    static std::unique_ptr<CurlInstance> sCurlInstance = nullptr;
+
     std::string QueryURL(const std::string& url)
     {
-        CURL*    curl;
         CURLcode result;
 
         std::string data;
 
-        curl_global_init(CURL_GLOBAL_DEFAULT);
-        curl = curl_easy_init();
+        if (!sCurlInstance)
+            sCurlInstance = std::make_unique<CurlInstance>();
+
+        auto curl = sCurlInstance->Get();
 
         if (!curl)
             return "";
@@ -128,9 +156,6 @@ namespace ICR
             spdlog::error("Failed to download shader toy shader: {}", curl_easy_strerror(result));
             return "";
         }
-
-        curl_easy_cleanup(curl);
-        curl_global_cleanup();
 
         return data;
     }

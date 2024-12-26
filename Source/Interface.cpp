@@ -67,12 +67,18 @@ void Interface::Draw()
 
     if (ImGui::CollapsingHeader("Presentation", ImGuiTreeNodeFlags_DefaultOpen))
     {
+        // Display
+        // ---------------------------
+
         ImGui::BeginDisabled(gWindowMode == WindowMode::Windowed);
         {
             if (StringListDropdown("Display", gDXGIOutputNames, gDXGIOutputsIndex))
                 gUpdateFlags |= UpdateFlags::Display;
         }
         ImGui::EndDisabled();
+
+        // Resolution
+        // ---------------------------
 
         ImGui::BeginDisabled(gWindowMode != WindowMode::Windowed);
 
@@ -81,18 +87,38 @@ void Interface::Draw()
 
         ImGui::EndDisabled();
 
-        ImGui::BeginDisabled(gWindowMode != WindowMode::ExclusiveFullscreen);
+        // Refresh Rate
+        // ---------------------------
 
-        if (StringListDropdown("Refresh Rate", gDXGIDisplayRefreshRatesStr, gDXGIDisplayRefreshRatesIndex))
-            gUpdateFlags |= UpdateFlags::SwapChainResize;
+        if (gWindowMode != WindowMode::ExclusiveFullscreen)
+        {
+            ImGui::BeginDisabled(true);
 
-        ImGui::EndDisabled();
+            int ununsed = 0;
+            StringListDropdown("Refresh Rate", { "DWM Controlled" }, ununsed);
+
+            ImGui::EndDisabled();
+        }
+        else
+        {
+            if (StringListDropdown("Refresh Rate", gDXGIDisplayRefreshRatesStr, gDXGIDisplayRefreshRatesIndex))
+                gUpdateFlags |= UpdateFlags::SwapChainResize;
+        }
+
+        // Adapter
+        // ---------------------------
 
         if (StringListDropdown("Adapter", gDXGIAdapterNames, gDXGIAdapterIndex))
             gUpdateFlags |= UpdateFlags::GraphicsRuntime;
 
+        // Window Mode
+        // ---------------------------
+
         if (EnumDropdown<WindowMode>("Window Mode", reinterpret_cast<int*>(&gWindowMode)))
             gUpdateFlags |= UpdateFlags::SwapChainResize;
+
+        // Swap Effect
+        // ---------------------------
 
         if (EnumDropdown<SwapEffect>("Swap Effect", reinterpret_cast<int*>(&gDXGISwapEffect)))
             gUpdateFlags |= UpdateFlags::SwapChainRecreate;
