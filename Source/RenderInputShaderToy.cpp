@@ -137,57 +137,54 @@ namespace ICR
 
     )";
 
-    void BuildRenderGraph(const nlohmann::json& parsedShaderToy)
+    constexpr const char* kUnsupportedInputs[1] = { "keyboard" };
+
+    bool BuildRenderGraph(const nlohmann::json& parsedShaderToy)
     {
-        tf::Taskflow renderGraph;
+        // Pass 1) Parse all non-buffer inputs.
+        // ---------------------------------
 
-        std::unordered_map<int, tf::Task> renderPassTasks;
+        std::unordered_set<std::string> inputTextureURLs;
 
-        auto ForEachRenderPass = [&](const std::function<void(const nlohmann::json&, const int&)>& func)
+        for (const auto& renderPass : parsedShaderToy["Shader"]["renderpass"])
         {
-            // Scan 1): Create a task for each render pass.
-            for (const auto& renderPass : parsedShaderToy["Shader"]["renderpass"])
+            for (const auto& input : renderPass["inputs"])
             {
-                int renderPassId;
+                auto inputType = input["ctype"].get<std::string>();
 
-                if (renderPass["outputs"].empty())
+                // Check if any unsupported input is detected.
+                if (std::find(std::begin(kUnsupportedInputs), std::end(kUnsupportedInputs), inputType) != std::end(kUnsupportedInputs))
                 {
-                    // Handle special case for the "Common" file.
-                    return; // renderPassId = -1;
-                }
-                else
-                {
-                    // Otherwise ShaderToy renderpasses only have one output.
-                    renderPassId = renderPass["outputs"][0]["id"].get<int>();
+                    spdlog::info("Shader requires unsupported input: {}", inputType);
+                    return false;
                 }
 
-                func(renderPass, renderPassId);
+                if (inputType == "texture")
+                    inputTextureURLs.insert(input["src"].get<std::string>());
             }
-        };
+        }
 
-        // Scan 1): Create a task for each render pass.
-        ForEachRenderPass([&](const nlohmann::json&, const int& id) { renderPassTasks[id] = renderGraph.emplace([id]() { spdlog::info(id); }); });
+        // Pass 1) Obtain any media from server.
+        // ---------------------------------
 
-        // Scan 2): Create dependencies between render passes.
-        ForEachRenderPass(
-            [&](const nlohmann::json& renderPass, const int& id)
-            {
-                for (const auto& input : renderPass["inputs"])
-                {
-                    renderPassTasks[input["id"]].precede(renderPassTasks[id]);
-                }
-            });
+        for (const auto& inputTextureURL : inputTextureURLs)
+        {
+            spdlog::debug("Fetching media: {}", inputTextureURL);
 
-        tf::Executor executor;
+            // Pull from the API.
+            auto result = QueryURL<std::vector<uint8_t>>("https://www.shadertoy.com" + inputTextureURL);
 
-        executor.run(renderGraph).wait();
+            spdlog::debug(result);
+        }
+
+        return true;
     }
 
     bool CompileShaderToyToGraphicsPSO(const std::string& shaderID, ID3D12RootSignature** ppRootSignature, ID3D12PipelineState** ppPSO)
     {
         // 1) Download the shader toy shader.
         // -----------------------------------
-        auto data = QueryURL("https://www.shadertoy.com/api/v1/shaders/" + shaderID.substr(0, 6) + "?key=BtrjRM");
+        auto data = QueryURL<std::string>("https://www.shadertoy.com/api/v1/shaders/" + shaderID.substr(0, 6) + "?key=BtrjRM");
 
         // 2) Parse result into JSON.
         // --------------------------
@@ -206,7 +203,8 @@ namespace ICR
         }
 
         // Build task-graph.
-        // BuildRenderGraph(parsedData);
+        // if (!BuildRenderGraph(parsedData))
+        //     return false;
 
         // For now, grab the first render pass.
         auto shaderToySource = parsedData["Shader"]["renderpass"][0]["code"].get<std::string>();

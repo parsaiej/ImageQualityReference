@@ -231,7 +231,8 @@ namespace ICR
     bool ReadFileBytes(const std::string& filename, std::vector<uint8_t>& data);
 
     // Query URL and return result in a string (empty it failed).
-    std::string QueryURL(const std::string& url);
+    template <typename T>
+    T QueryURL(const std::string& url);
 
     // Compile GLSL to SPIR-V using glslang (empty if failed).
     std::vector<uint32_t> CompileGLSLToSPIRV(const char** sources, int sourceCount, EShLanguage stage);

@@ -97,14 +97,6 @@ namespace ICR
         return true;
     }
 
-    auto CurlWriteCallback(void* contents, size_t size, size_t nmemb, std::string* userp)
-    {
-        size_t totalSize = size * nmemb;
-        userp->append(static_cast<char*>(contents), totalSize);
-
-        return totalSize;
-    };
-
     class CurlInstance
     {
     public:
@@ -132,11 +124,12 @@ namespace ICR
 
     static std::unique_ptr<CurlInstance> sCurlInstance = nullptr;
 
-    std::string QueryURL(const std::string& url)
+    template <typename T>
+    T QueryURL(const std::string& url)
     {
         CURLcode result;
 
-        std::string data;
+        T data;
 
         if (!sCurlInstance)
             sCurlInstance = std::make_unique<CurlInstance>();
@@ -144,7 +137,14 @@ namespace ICR
         auto curl = sCurlInstance->Get();
 
         if (!curl)
-            return "";
+            return T();
+
+        auto CurlWriteCallback = +[](void* contents, size_t size, size_t nmemb, T* userp)
+        {
+            size_t totalSize = size * nmemb;
+            userp->insert(userp->end(), static_cast<uint8_t*>(contents), static_cast<uint8_t*>(contents) + totalSize);
+            return totalSize;
+        };
 
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, CurlWriteCallback);
@@ -154,11 +154,14 @@ namespace ICR
         if (result != CURLE_OK)
         {
             spdlog::error("Failed to download shader toy shader: {}", curl_easy_strerror(result));
-            return "";
+            return T();
         }
 
         return data;
     }
+
+    template std::string          QueryURL<std::string>(const std::string& url);
+    template std::vector<uint8_t> QueryURL<std::vector<uint8_t>>(const std::string& url);
 
     std::vector<uint32_t> CompileGLSLToSPIRV(const char** pSources, int sourceCount, EShLanguage stage)
     {
