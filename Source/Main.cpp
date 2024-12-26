@@ -837,6 +837,11 @@ void SyncSettings()
             gRenderInput->Initialize();
     }
 
+    if ((gUpdateFlags & UpdateFlags::Display) != 0)
+    {
+        spdlog::info("Updating Display");
+    }
+
     // Clear update flags.
     gUpdateFlags = 0u;
 }
