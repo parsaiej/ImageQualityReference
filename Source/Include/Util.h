@@ -25,7 +25,8 @@ namespace ICR
         SwapChainRecreate  = 1 << 1,
         SwapChainResize    = 1 << 2,
         GraphicsRuntime    = 1 << 3,
-        RenderInputChanged = 1 << 4
+        RenderInputChanged = 1 << 4,
+        Display            = 1 << 5
     };
 
     // ---------------------------

@@ -67,7 +67,12 @@ void Interface::Draw()
 
     if (ImGui::CollapsingHeader("Presentation", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        StringListDropdown("Display", gDXGIOutputNames, gDXGIOutputsIndex);
+        ImGui::BeginDisabled(gWindowMode == WindowMode::Windowed);
+        {
+            if (StringListDropdown("Display", gDXGIOutputNames, gDXGIOutputsIndex))
+                gUpdateFlags |= UpdateFlags::Display;
+        }
+        ImGui::EndDisabled();
 
         ImGui::BeginDisabled(gWindowMode != WindowMode::Windowed);
 
