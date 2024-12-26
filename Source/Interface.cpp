@@ -73,7 +73,7 @@ void Interface::Draw()
         ImGui::BeginDisabled(gWindowMode == WindowMode::Windowed);
         {
             if (StringListDropdown("Display", gDXGIOutputNames, gDXGIOutputsIndex))
-                gUpdateFlags |= UpdateFlags::Display;
+                gUpdateFlags |= UpdateFlags::SwapChainResize;
         }
         ImGui::EndDisabled();
 
