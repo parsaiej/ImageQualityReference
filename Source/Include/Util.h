@@ -98,7 +98,7 @@ namespace ICR
     {
         bool operator()(const DXGI_RATIONAL& lhs, const DXGI_RATIONAL& rhs) const
         {
-            return lhs.Numerator * rhs.Denominator < rhs.Numerator * lhs.Denominator;
+            return static_cast<int>(lhs.Numerator / lhs.Denominator) < static_cast<int>(rhs.Numerator / rhs.Denominator);
         }
     };
 
