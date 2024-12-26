@@ -23,12 +23,19 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Packages
 # --------------------------------
 
-find_package(spdlog          CONFIG REQUIRED)
-find_package(Jolt            CONFIG REQUIRED)
-find_package(imgui           CONFIG REQUIRED)
-find_package(implot          CONFIG REQUIRED)
-find_package(magic_enum      CONFIG REQUIRED)
-find_package(Stb                    REQUIRED)
+find_package(spdlog                 CONFIG REQUIRED)
+find_package(Jolt                   CONFIG REQUIRED)
+find_package(imgui                  CONFIG REQUIRED)
+find_package(implot                 CONFIG REQUIRED)
+find_package(magic_enum             CONFIG REQUIRED)
+find_package(glfw3                  CONFIG REQUIRED)
+find_package(TBB                    CONFIG REQUIRED) 
+find_package(Taskflow               CONFIG REQUIRED) 
+find_package(d3d12-memory-allocator CONFIG REQUIRED)
+find_package(glslang                CONFIG REQUIRED)
+find_package(nlohmann_json          CONFIG REQUIRED)
+find_package(CURL                          REQUIRED)
+find_package(Stb                           REQUIRED)
 
 # Executable
 # --------------------------------
@@ -36,21 +43,32 @@ find_package(Stb                    REQUIRED)
 add_executable(ImageQualityReference WIN32
     Source/Main.cpp
     Source/Util.cpp
+    Source/Interface.cpp
     Source/Precompiled.cpp
+    Source/RenderInputShaderToy.cpp
 )
+
+# Compile Options
+# --------------------------------
+
+target_compile_options(ImageQualityReference PRIVATE /W4 /WX)
 
 # PCH
 # --------------------------------
 
-target_precompile_headers(ImageQualityReference PRIVATE Source/Precompiled.h)
+target_precompile_headers(ImageQualityReference PRIVATE Source/Include/Precompiled.h)
 
 # Defines
 # --------------------------------
+
+add_definitions(-DHAVE_STRUCT_TIMESPEC)
 
 # Include
 # --------------------------------
 
 target_include_directories(ImageQualityReference BEFORE PRIVATE 
+    Source/Include/
+    External/spirv-to-dxil/include
     $ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/include/
     $ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/include/d3dx12/
     ${Stb_INCLUDE_DIR}
@@ -64,9 +82,20 @@ target_link_libraries(ImageQualityReference PRIVATE
     Jolt::Jolt
     dxgi
     d3d12
+    glfw
+    CURL::libcurl
+    TBB::tbb
+    Taskflow::Taskflow
     imgui::imgui
     implot::implot
+    unofficial::D3D12MemoryAllocator
     magic_enum::magic_enum
+    glslang::glslang
+    glslang::glslang-default-resource-limits
+    glslang::SPIRV
+    nlohmann_json::nlohmann_json
+    synchronization.lib
+    ${CMAKE_SOURCE_DIR}/External/spirv-to-dxil/lib/x64/${CMAKE_BUILD_TYPE}/libspirv_to_dxil.lib
 )
 
 configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/D3D12Core.dll      D3D12/D3D12Core.dll      COPYONLY)
