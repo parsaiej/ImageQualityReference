@@ -198,6 +198,26 @@ void Interface::Draw()
 
     ImGui::End();
 
+    if (gWindowMode != WindowMode::Windowed)
+    {
+        // Create a separate window for the "X" button
+        ImGui::SetNextWindowPos(ImVec2(ImGui::GetIO().DisplaySize.x - 50, 0));
+        ImGui::SetNextWindowSize(ImVec2(50, 50));
+        ImGui::Begin("CloseButtonWindow",
+                     nullptr,
+                     ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                         ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings |
+                         ImGuiWindowFlags_NoBackground);
+
+        ImVec2 cursorPos = ImGui::GetCursorPos();
+        ImGui::SetCursorPos(ImVec2(cursorPos.x - 9, cursorPos.y - 10));
+
+        if (ImGui::Button("X", ImVec2(50, 50)))
+            glfwSetWindowShouldClose(gWindow, true);
+
+        ImGui::End();
+    }
+
     ImGui::SetNextWindowPos(ImVec2((float)gBackBufferSize.x * 0.25f, (float)gBackBufferSize.y * 0.75f));
     ImGui::SetNextWindowSize(ImVec2((float)gBackBufferSize.x * 0.75f, (float)gBackBufferSize.y * 0.25f));
     ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(FLT_MAX, FLT_MAX));
