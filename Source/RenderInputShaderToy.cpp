@@ -174,10 +174,76 @@ namespace ICR
         {
             spdlog::debug("Fetching media: {}", inputTextureURL);
 
-            // Pull from the API.
-            auto result = QueryURL<std::vector<uint8_t>>("https://www.shadertoy.com" + inputTextureURL);
+            // Pull image bytes from the API.
+            // ------------------------------
 
-            spdlog::debug(result);
+            auto data = QueryURL<std::vector<uint8_t>>("https://www.shadertoy.com" + inputTextureURL);
+
+            if (data.empty())
+            {
+                spdlog::error("Failed to fetch media: {}", inputTextureURL);
+                return false;
+            }
+
+            // Load the image
+            // ------------------------------
+
+            int  width, height, channels;
+            auto pImage = stbi_load_from_memory(data.data(), static_cast<int>(data.size()), &width, &height, &channels, STBI_rgb_alpha);
+
+            if (!pImage)
+            {
+                spdlog::error("Failed to load image from bytes.");
+                return false;
+            }
+
+            // Create the dedicated resource.
+            // -------------------------------
+
+            DeviceResource dedicatedMemory;
+
+            dedicatedMemory.resourceDesc   = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, width, height, 1, 1);
+            dedicatedMemory.allocationDesc = { D3D12MA::ALLOCATION_FLAG_NONE, D3D12_HEAP_TYPE_DEFAULT };
+
+            ThrowIfFailed(gMemoryAllocator->CreateResource(&dedicatedMemory.allocationDesc,
+                                                           &dedicatedMemory.resourceDesc,
+                                                           D3D12_RESOURCE_STATE_COMMON,
+                                                           nullptr,
+                                                           &dedicatedMemory.allocation,
+                                                           IID_PPV_ARGS(&dedicatedMemory.resource)));
+
+            // Create the upload resource.
+            // -------------------------------
+
+            DeviceResource scratchMemory;
+
+            scratchMemory.resourceDesc   = CD3DX12_RESOURCE_DESC::Buffer(GetRequiredIntermediateSize(dedicatedMemory.resource.Get(), 0, 1));
+            scratchMemory.allocationDesc = { D3D12MA::ALLOCATION_FLAG_NONE, D3D12_HEAP_TYPE_UPLOAD };
+
+            ThrowIfFailed(gMemoryAllocator->CreateResource(&scratchMemory.allocationDesc,
+                                                           &scratchMemory.resourceDesc,
+                                                           D3D12_RESOURCE_STATE_COMMON,
+                                                           nullptr,
+                                                           &scratchMemory.allocation,
+                                                           IID_PPV_ARGS(&scratchMemory.resource)));
+
+            // Copy from staging -> dedicated memory.
+            // -------------------------------
+
+            ExecuteCommandListAndWait(
+                gLogicalDevice.Get(),
+                gCommandQueue.Get(),
+                [=](ID3D12GraphicsCommandList* pCmd)
+                {
+                    D3D12_SUBRESOURCE_DATA subresourceData = {};
+                    subresourceData.pData                  = pImage;
+                    subresourceData.RowPitch               = width * 4;
+                    subresourceData.SlicePitch             = subresourceData.RowPitch * height;
+
+                    UpdateSubresources(pCmd, dedicatedMemory.resource.Get(), scratchMemory.resource.Get(), 0, 0, 1, &subresourceData);
+                });
+
+            spdlog::info("Upload complete!");
         }
 
         return true;
@@ -206,8 +272,8 @@ namespace ICR
         }
 
         // Build task-graph.
-        // if (!BuildRenderGraph(parsedData))
-        //     return false;
+        if (!BuildRenderGraph(parsedData))
+            return false;
 
         // For now, grab the first render pass.
         auto shaderToySource = parsedData["Shader"]["renderpass"][0]["code"].get<std::string>();

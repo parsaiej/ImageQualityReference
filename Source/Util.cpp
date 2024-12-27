@@ -238,4 +238,47 @@ namespace ICR
         return true;
     }
 
+    void ExecuteCommandListAndWait(ID3D12Device*                                   pDevice,
+                                   ID3D12CommandQueue*                             pCommandQueue,
+                                   std::function<void(ID3D12GraphicsCommandList*)> recordCommandsFunc)
+    {
+        // Create a command allocator
+        ComPtr<ID3D12CommandAllocator> commandAllocator;
+        ThrowIfFailed(pDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocator)));
+
+        // Create a command list
+        ComPtr<ID3D12GraphicsCommandList> commandList;
+        ThrowIfFailed(pDevice->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocator.Get(), nullptr, IID_PPV_ARGS(&commandList)));
+
+        // Record commands
+        recordCommandsFunc(commandList.Get());
+
+        // Close the command list
+        ThrowIfFailed(commandList->Close());
+
+        // Execute the command list
+        ID3D12CommandList* ppCommandLists[] = { commandList.Get() };
+        pCommandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
+
+        // Create a fence for synchronization
+        ComPtr<ID3D12Fence> fence;
+        ThrowIfFailed(pDevice->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
+        HANDLE fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+        if (fenceEvent == nullptr)
+        {
+            ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+        }
+
+        // Signal and wait for the fence
+        const UINT64 fenceValue = 1;
+        ThrowIfFailed(pCommandQueue->Signal(fence.Get(), fenceValue));
+        if (fence->GetCompletedValue() < fenceValue)
+        {
+            ThrowIfFailed(fence->SetEventOnCompletion(fenceValue, fenceEvent));
+            WaitForSingleObject(fenceEvent, INFINITE);
+        }
+
+        CloseHandle(fenceEvent);
+    }
+
 } // namespace ICR

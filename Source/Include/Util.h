@@ -25,8 +25,18 @@ namespace ICR
         SwapChainRecreate  = 1 << 1,
         SwapChainResize    = 1 << 2,
         GraphicsRuntime    = 1 << 3,
-        RenderInputChanged = 1 << 4,
-        Display            = 1 << 5
+        RenderInputChanged = 1 << 4
+    };
+
+    // ---------------------------
+
+    struct DeviceResource
+    {
+        ComPtr<ID3D12Resource> resource;
+        CD3DX12_RESOURCE_DESC  resourceDesc;
+
+        ComPtr<D3D12MA::Allocation> allocation;
+        D3D12MA::ALLOCATION_DESC    allocationDesc;
     };
 
     // ---------------------------
@@ -239,6 +249,10 @@ namespace ICR
 
     // Cross compiles a SPIR-V module to DXIL.
     bool CrossCompileSPIRVToDXIL(const std::string& entryPoint, const std::vector<uint32_t>& spirv, std::vector<uint8_t>& dxil);
+
+    void ExecuteCommandListAndWait(ID3D12Device*                                   pDevice,
+                                   ID3D12CommandQueue*                             pCommandQueue,
+                                   std::function<void(ID3D12GraphicsCommandList*)> recordCommandsFunc);
 
 } // namespace ICR
 

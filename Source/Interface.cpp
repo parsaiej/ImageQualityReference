@@ -210,7 +210,7 @@ void Interface::Draw()
                          ImGuiWindowFlags_NoBackground);
 
         ImVec2 cursorPos = ImGui::GetCursorPos();
-        ImGui::SetCursorPos(ImVec2(cursorPos.x - 9, cursorPos.y - 10));
+        ImGui::SetCursorPos(ImVec2(cursorPos.x - 10, cursorPos.y - 10));
 
         if (ImGui::Button("X", ImVec2(50, 50)))
             glfwSetWindowShouldClose(gWindow, true);
