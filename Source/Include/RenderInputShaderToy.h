@@ -27,7 +27,7 @@ namespace ICR
 
             RenderPass(const Args& args);
 
-            void Dispatch();
+            void Dispatch(ID3D12GraphicsCommandList* pCmd);
 
             inline const int&              GetOutputID() const { return mOutputID; }
             inline const std::vector<int>& GetInputIDs() const { return mInputIDs; }
@@ -83,6 +83,7 @@ namespace ICR
 
         tf::Taskflow                             mRenderGraph;
         std::string                              mCommonShaderGLSL;
+        ID3D12GraphicsCommandList*               mpActiveCommandList;
         std::vector<std::unique_ptr<RenderPass>> mRenderPasses;
         std::string                              mShaderID;
         MediaCache                               mMediaCache;

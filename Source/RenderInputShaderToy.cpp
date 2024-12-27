@@ -27,6 +27,8 @@ namespace ICR
             float padding[28];
         };
 
+
+        // Types are defined at runtime in the preample.
         layout (set = 1, binding = 0) uniform SAMPLER_TYPE0 iChannel0;
         layout (set = 1, binding = 1) uniform SAMPLER_TYPE1 iChannel1;
         layout (set = 1, binding = 2) uniform SAMPLER_TYPE2 iChannel2;
@@ -51,6 +53,8 @@ namespace ICR
 
     )";
 
+    constexpr const char* kUnsupportedInputs[1] = { "keyboard" };
+
     // Render Pass
     // -------------------------------------------------
 
@@ -64,7 +68,16 @@ namespace ICR
 
         // Resolve the input IDs.
         for (const auto& input : args.renderPassInfo["inputs"])
+        {
+            // Check if input is any of the unsupported ones.
+            for (const auto& unsupportedInput : kUnsupportedInputs)
+            {
+                if (input["ctype"].get<std::string>() == unsupportedInput)
+                    throw std::runtime_error("Unsupported input type.");
+            }
+
             mInputIDs.push_back(input["id"].get<int>());
+        }
 
         // Compile PSO.
         {
@@ -115,15 +128,13 @@ namespace ICR
 
                     if (!sampleIndexHasInput)
                     {
-                        // Default to 2D.
+                        // Default to 2D if no input is found.
                         preambleStream << "sampler2D";
                     }
 
                     preambleStream << std::endl;
                 }
             }
-
-            spdlog::info(preambleStream.str());
 
             auto renderPassSPIRV = CompileGLSLToSPIRV(shaderStrings, ARRAYSIZE(shaderStrings), EShLangFragment, preambleStream.str().c_str());
 
@@ -186,7 +197,11 @@ namespace ICR
         }
     }
 
-    void RenderInputShaderToy::RenderPass::Dispatch() { spdlog::info("Dispatching RenderPass: Output ID: {}", mOutputID); }
+    void RenderInputShaderToy::RenderPass::Dispatch(ID3D12GraphicsCommandList* pCmd)
+    {
+        pCmd->SetPipelineState(mPSO.Get());
+        pCmd->DrawInstanced(3U, 1U, 0U, 0U);
+    }
 
     // -------------------------------------------------
 
@@ -194,7 +209,7 @@ namespace ICR
     {
         // Initialize the shadertoy to a known-good one.
         // "Raymarching - Primitives" https://www.shadertoy.com/view/Xds3zN
-        memcpy(mShaderID.data(), "lscBW4", 6);
+        memcpy(mShaderID.data(), "Xds3zN", 6);
 
         // Initial async compile state.
         mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Idle);
@@ -264,7 +279,6 @@ namespace ICR
         // ---------------------------
 
         {
-            // Create a descriptor range for the samplers.
             D3D12_DESCRIPTOR_RANGE inputSRVRanges = {};
             {
                 inputSRVRanges.RangeType          = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
@@ -358,7 +372,7 @@ namespace ICR
         mInitialized = true;
     }
 
-    constexpr const char* kUnsupportedInputs[1] = { "keyboard" };
+    ID3D12GraphicsCommandList* pCommandList = nullptr;
 
     bool RenderInputShaderToy::BuildRenderGraph(const nlohmann::json& parsedShaderToy)
     {
@@ -367,6 +381,12 @@ namespace ICR
 
         // Reset the render graph.
         mRenderGraph.clear();
+
+        // Clear the render passes.
+        mRenderPasses.clear();
+
+        // CLear the common shader.
+        mCommonShaderGLSL.clear();
 
         // Scan 1) Pre-pass for the common shader.
         for (const auto& renderPassInfo : parsedShaderToy["Shader"]["renderpass"])
@@ -404,7 +424,7 @@ namespace ICR
             auto* renderPass = mRenderPasses.back().get();
 
             // Insert the render pass into the render graph.
-            renderPassTaskMap[renderPass->GetOutputID()] = mRenderGraph.emplace([renderPass]() { renderPass->Dispatch(); });
+            renderPassTaskMap[renderPass->GetOutputID()] = mRenderGraph.emplace([this, renderPass]() { renderPass->Dispatch(mpActiveCommandList); });
         }
 
         // Scan 3) Resolve all render pass dependencies.
@@ -423,9 +443,6 @@ namespace ICR
                 renderPassTaskMap[inputID].precede(renderPassTaskMap[renderPass->GetOutputID()]);
             }
         }
-
-        tf::Executor executor;
-        executor.run(mRenderGraph).wait();
 
 #if 0
         // Pass 1) Parse all non-buffer inputs.
@@ -559,7 +576,7 @@ namespace ICR
             return false;
 
         // TEMP
-        return false;
+        return true;
     }
 
     void RenderInputShaderToy::RenderInterface()
@@ -654,14 +671,21 @@ namespace ICR
         elapsedSeconds += gDeltaTime;
         elapsedFrames++;
 
+        // Root signature is the same for all render passes, so set it once.
         frameParams.pCmd->SetGraphicsRootSignature(mRootSignature.Get());
         frameParams.pCmd->SetDescriptorHeaps(1U, mUBOHeap.GetAddressOf());
         frameParams.pCmd->SetGraphicsRootConstantBufferView(0u, mUBO->GetGPUVirtualAddress());
         frameParams.pCmd->RSSetScissorRects(1U, &scissor);
-        frameParams.pCmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         frameParams.pCmd->RSSetViewports(1U, &gViewport);
-        frameParams.pCmd->SetPipelineState(mPSO.Get());
-        frameParams.pCmd->DrawInstanced(3U, 1U, 0U, 0U);
+        frameParams.pCmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+        // Configure the active command lists.
+        mpActiveCommandList = frameParams.pCmd;
+
+        tf::Executor renderGraphExecutor;
+
+        // Dispatch all of the render passes in order.
+        renderGraphExecutor.run(mRenderGraph).wait();
     }
 
     void RenderInputShaderToy::Release()
