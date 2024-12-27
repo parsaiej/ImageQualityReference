@@ -18,7 +18,14 @@ namespace ICR
         {
         public:
 
-            RenderPass(const nlohmann::json& renderPassInfo);
+            struct Args
+            {
+                ID3D12RootSignature*  pRootSignature;
+                const nlohmann::json& renderPassInfo;
+                const std::string&    commonShaderGLSL;
+            };
+
+            RenderPass(const Args& args);
 
             void Dispatch();
 
@@ -71,7 +78,7 @@ namespace ICR
 
     private:
 
-        bool CompileShaderToyToGraphicsPSO(const std::string& shaderID, ID3D12RootSignature** ppRootSignature, ID3D12PipelineState** ppPSO);
+        bool CompileShaderToy(const std::string& shaderID);
         bool BuildRenderGraph(const nlohmann::json& parsedShaderToy);
 
         tf::Taskflow                             mRenderGraph;
@@ -82,8 +89,8 @@ namespace ICR
         bool                                     mInitialized;
         ComPtr<ID3D12PipelineState>              mPSO;
         ComPtr<ID3D12Resource>                   mUBO;
-        ComPtr<ID3D12DescriptorHeap>             mUBOHeap;
         ComPtr<D3D12MA::Allocation>              mUBOAllocation;
+        ComPtr<ID3D12DescriptorHeap>             mUBOHeap;
         void*                                    mpUBOData;
         ComPtr<ID3D12RootSignature>              mRootSignature;
         std::atomic<AsyncCompileShaderToyStatus> mAsyncCompileStatus;

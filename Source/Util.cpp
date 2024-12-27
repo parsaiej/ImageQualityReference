@@ -173,7 +173,16 @@ namespace ICR
         //       (SPIR-V 1.1+ is needed by spirv_to_dxil)
         //       (Vulkan is needed for easier D3D12 adaption).
         shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_3);
-        shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_1);
+        shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_6);
+
+        shader.setPreamble(R"(
+        
+            #define SAMPLER_TYPE0 samplerCube
+            #define SAMPLER_TYPE1 sampler2D
+            #define SAMPLER_TYPE2 sampler2D
+            #define SAMPLER_TYPE3 sampler2D
+        
+        )");
 
         if (!shader.parse(GetDefaultResources(), 450, true, EShMsgEnhanced))
         {

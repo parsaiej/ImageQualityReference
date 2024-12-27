@@ -4,19 +4,140 @@
 
 namespace ICR
 {
+    constexpr const char* kFragmentShaderShaderToyInputs = R"(
+
+        layout (set = 0, binding = 0) uniform UBO
+        {
+            // Add some application-specific inputs.
+            vec4 iAppViewport;
+
+            // Constant buffer adapted from ShaderToy inputs.
+            vec3      iResolution;           // viewport resolution (in pixels)
+            float     iTime;                 // shader playback time (in seconds)
+            float     iTimeDelta;            // render time (in seconds)
+            float     iFrameRate;            // shader frame rate
+            int       iFrame;                // shader playback frame
+            float     iChannelTime[4];       // channel playback time (in seconds)
+            vec3      iChannelResolution[4]; // channel resolution (in pixels)
+            vec4      iMouse;                // mouse pixel coords. xy: current (if MLB down), zw: click
+            vec4      iDate;                 // (year, month, day, time in seconds)
+            float     iSampleRate;           // sound sample rate (i.e., 44100)
+
+            // Pad-up to 256 bytes.
+            float padding[28];
+        };
+
+        layout (set = 1, binding = 0) uniform SAMPLER_TYPE0 iChannel0;
+        layout (set = 1, binding = 1) uniform SAMPLER_TYPE1 iChannel1;
+        layout (set = 1, binding = 2) uniform SAMPLER_TYPE2 iChannel2;
+        layout (set = 1, binding = 3) uniform SAMPLER_TYPE3 iChannel3;
+
+    )";
+
+    constexpr const char* kFragmentShaderMainInvocation = R"(
+
+        layout (location = 0) out vec4 fragColorOut;
+
+        void main()
+        {
+            vec2 fragCoordViewport = gl_FragCoord.xy;
+
+            fragCoordViewport.x -= iAppViewport.x;
+            fragCoordViewport.y  = iResolution.y - fragCoordViewport.y;
+
+            // Invoke the ShaderToy shader.
+            mainImage(fragColorOut, fragCoordViewport);
+        }
+
+    )";
 
     // Render Pass
     // -------------------------------------------------
 
-    RenderInputShaderToy::RenderPass::RenderPass(const nlohmann::json& renderPassInfo)
+    using RenderPass = RenderInputShaderToy::RenderPass;
+
+    RenderPass::RenderPass(const RenderPass::Args& args)
     {
         // Resolve the output ID.
         // WARNING: Currently ShaderToy does not support MRT, so we assume there will only ever be one output per-pass.
-        mOutputID = renderPassInfo["outputs"][0]["id"].get<int>();
+        mOutputID = args.renderPassInfo["outputs"][0]["id"].get<int>();
 
         // Resolve the input IDs.
-        for (const auto& input : renderPassInfo["inputs"])
+        for (const auto& input : args.renderPassInfo["inputs"])
             mInputIDs.push_back(input["id"].get<int>());
+
+        // Compile PSO.
+        {
+            // 1) Compile GLSL to SPIR-V.
+            // --------------------------
+
+            auto renderPassSourceCodeGLSL = args.renderPassInfo["code"].get<std::string>();
+
+            // Compose a GLSL shader that makes the ShaderToy shader Vulkan-conformant.
+            const char* shaderStrings[4] = { kFragmentShaderShaderToyInputs,
+                                             args.commonShaderGLSL.c_str(),
+                                             renderPassSourceCodeGLSL.c_str(),
+                                             kFragmentShaderMainInvocation };
+
+            auto renderPassSPIRV = CompileGLSLToSPIRV(shaderStrings, 4, EShLangFragment);
+
+            if (renderPassSPIRV.empty())
+                throw std::runtime_error("Failed to compile GLSL to SPIR-V.");
+
+            // 2) Convert SPIR-V to DXIL.
+            // --------------------------
+
+            std::vector<uint8_t> renderPassDXIL;
+            if (!CrossCompileSPIRVToDXIL("main", renderPassSPIRV, renderPassDXIL))
+                throw std::runtime_error("Failed to cross-compile SPIR-V to DXIL.");
+
+            // 3) Load our matching fullscreen triangle vertex shader DXIL.
+            // ---------------------------
+
+            std::string vertexShaderPath = "C:\\Development\\ImageQualityReference\\Assets\\Shaders\\Compiled\\FullscreenTriangle.vert.dxil";
+
+            std::vector<uint8_t> fullscreenTriangleVertexShaderDXIL;
+            if (!ReadFileBytes(vertexShaderPath, fullscreenTriangleVertexShaderDXIL))
+                throw std::runtime_error("Failed to load fullscreen triangle vertex shader DXIL.");
+
+            // 4) Create Graphics PSO.
+            // --------------------------
+
+            D3D12_BLEND_DESC blendDesc               = {};
+            blendDesc.AlphaToCoverageEnable          = FALSE;
+            blendDesc.IndependentBlendEnable         = FALSE;
+            blendDesc.RenderTarget[0].BlendEnable    = FALSE;
+            blendDesc.RenderTarget[0].LogicOpEnable  = FALSE;
+            blendDesc.RenderTarget[0].SrcBlend       = D3D12_BLEND_ONE;
+            blendDesc.RenderTarget[0].DestBlend      = D3D12_BLEND_ZERO;
+            blendDesc.RenderTarget[0].BlendOp        = D3D12_BLEND_OP_ADD;
+            blendDesc.RenderTarget[0].SrcBlendAlpha  = D3D12_BLEND_ONE;
+            blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
+            blendDesc.RenderTarget[0].BlendOpAlpha   = D3D12_BLEND_OP_ADD;
+            blendDesc.RenderTarget[0].LogicOp        = D3D12_LOGIC_OP_NOOP;
+            blendDesc.RenderTarget[0].RenderTargetWriteMask =
+                D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN | D3D12_COLOR_WRITE_ENABLE_BLUE | D3D12_COLOR_WRITE_ENABLE_ALPHA;
+
+            D3D12_GRAPHICS_PIPELINE_STATE_DESC shaderToyPSOInfo = {};
+            {
+                shaderToyPSOInfo.PS                       = { renderPassDXIL.data(), renderPassDXIL.size() };
+                shaderToyPSOInfo.VS                       = { fullscreenTriangleVertexShaderDXIL.data(), fullscreenTriangleVertexShaderDXIL.size() };
+                shaderToyPSOInfo.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+                shaderToyPSOInfo.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+                shaderToyPSOInfo.RasterizerState.MultisampleEnable = FALSE;
+                shaderToyPSOInfo.BlendState                        = blendDesc;
+                shaderToyPSOInfo.PrimitiveTopologyType             = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+                shaderToyPSOInfo.SampleMask                        = UINT_MAX;
+                shaderToyPSOInfo.NumRenderTargets                  = 1;
+                shaderToyPSOInfo.RTVFormats[0]                     = DXGI_FORMAT_R8G8B8A8_UNORM;
+                shaderToyPSOInfo.SampleDesc.Count                  = 1;
+                shaderToyPSOInfo.pRootSignature                    = args.pRootSignature;
+            }
+
+            // Compile the PSO in the driver.
+            if (gLogicalDevice->CreateGraphicsPipelineState(&shaderToyPSOInfo, IID_PPV_ARGS(&mPSO)) != S_OK)
+                throw std::runtime_error("Failed to create graphics PSO.");
+        }
     }
 
     void RenderInputShaderToy::RenderPass::Dispatch() { spdlog::info("Dispatching RenderPass: Output ID: {}", mOutputID); }
@@ -93,6 +214,80 @@ namespace ICR
         }
         gLogicalDevice->CreateConstantBufferView(&constantBufferViewDesc, mUBOHeap->GetCPUDescriptorHandleForHeapStart());
 
+        // Create the root signature (same for all render passes).
+        // ---------------------------
+
+        {
+            // Create a descriptor range for the samplers.
+            D3D12_DESCRIPTOR_RANGE inputSRVRanges = {};
+            {
+                inputSRVRanges.RangeType          = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+                inputSRVRanges.NumDescriptors     = 4;
+                inputSRVRanges.BaseShaderRegister = 0;
+                inputSRVRanges.RegisterSpace      = 1;
+            }
+
+            D3D12_DESCRIPTOR_RANGE inputSMPRanges = {};
+            {
+                inputSMPRanges.RangeType          = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+                inputSMPRanges.NumDescriptors     = 4;
+                inputSMPRanges.BaseShaderRegister = 0;
+                inputSMPRanges.RegisterSpace      = 1;
+            }
+
+            std::vector<D3D12_ROOT_PARAMETER> rootParameters;
+            {
+
+                D3D12_ROOT_PARAMETER uniformsParameter = {};
+                {
+                    uniformsParameter.ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
+                    uniformsParameter.Descriptor.RegisterSpace  = 0;
+                    uniformsParameter.Descriptor.ShaderRegister = 0;
+                    uniformsParameter.ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
+                }
+                rootParameters.push_back(uniformsParameter);
+
+                D3D12_ROOT_PARAMETER shaderResourceDescriptorTable = {};
+                {
+                    shaderResourceDescriptorTable.ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+                    shaderResourceDescriptorTable.DescriptorTable.NumDescriptorRanges = 1;
+                    shaderResourceDescriptorTable.DescriptorTable.pDescriptorRanges   = &inputSRVRanges;
+                    shaderResourceDescriptorTable.ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
+                }
+                rootParameters.push_back(shaderResourceDescriptorTable);
+
+                D3D12_ROOT_PARAMETER samplerDescriptorTable = {};
+                {
+                    samplerDescriptorTable.ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+                    samplerDescriptorTable.DescriptorTable.NumDescriptorRanges = 1;
+                    samplerDescriptorTable.DescriptorTable.pDescriptorRanges   = &inputSMPRanges;
+                    samplerDescriptorTable.ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
+                }
+                rootParameters.push_back(samplerDescriptorTable);
+            }
+
+            D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc = {};
+
+            rootSignatureDesc.Version                = D3D_ROOT_SIGNATURE_VERSION_1_0;
+            rootSignatureDesc.Desc_1_0.NumParameters = static_cast<UINT>(rootParameters.size());
+            rootSignatureDesc.Desc_1_0.pParameters   = rootParameters.data();
+
+            ComPtr<ID3DBlob> pBlobSignature;
+            ComPtr<ID3DBlob> pBlobError;
+            if (FAILED(D3D12SerializeVersionedRootSignature(&rootSignatureDesc, &pBlobSignature, &pBlobError)))
+            {
+                if (pBlobError)
+                    spdlog::error((static_cast<char*>(pBlobError->GetBufferPointer())));
+
+                return;
+            }
+
+            ThrowIfFailed(gLogicalDevice->CreateRootSignature(0,
+                                                              pBlobSignature->GetBufferPointer(),
+                                                              pBlobSignature->GetBufferSize(),
+                                                              IID_PPV_ARGS(&mRootSignature)));
+        }
+
         // Compile
         // ---------------------------
 
@@ -107,7 +302,7 @@ namespace ICR
             gTaskGroup.run(
                 [&]()
                 {
-                    if (CompileShaderToyToGraphicsPSO(mShaderID, &mRootSignature, &mPSO))
+                    if (CompileShaderToy(mShaderID))
                         mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Compiled);
                     else
                         mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Failed);
@@ -116,48 +311,6 @@ namespace ICR
 
         mInitialized = true;
     }
-
-    constexpr const char* kFragmentShaderShaderToyInputs = R"(
-
-        layout (set = 0, binding = 0) uniform UBO
-        {
-            // Add some application-specific inputs.
-            vec4 iAppViewport;
-
-            // Constant buffer adapted from ShaderToy inputs.
-            vec3      iResolution;           // viewport resolution (in pixels)
-            float     iTime;                 // shader playback time (in seconds)
-            float     iTimeDelta;            // render time (in seconds)
-            float     iFrameRate;            // shader frame rate
-            int       iFrame;                // shader playback frame
-            float     iChannelTime[4];       // channel playback time (in seconds)
-            vec3      iChannelResolution[4]; // channel resolution (in pixels)
-            vec4      iMouse;                // mouse pixel coords. xy: current (if MLB down), zw: click
-            vec4      iDate;                 // (year, month, day, time in seconds)
-            float     iSampleRate;           // sound sample rate (i.e., 44100)
-
-            // Pad-up to 256 bytes.
-            float padding[28];
-        };
-
-    )";
-
-    constexpr const char* kFragmentShaderMainInvocation = R"(
-
-        layout (location = 0) out vec4 fragColorOut;
-
-        void main()
-        {
-            vec2 fragCoordViewport = gl_FragCoord.xy;
-
-            fragCoordViewport.x -= iAppViewport.x;
-            fragCoordViewport.y  = iResolution.y - fragCoordViewport.y;
-
-            // Invoke the ShaderToy shader.
-            mainImage(fragColorOut, fragCoordViewport);
-        }
-
-    )";
 
     constexpr const char* kUnsupportedInputs[1] = { "keyboard" };
 
@@ -169,20 +322,37 @@ namespace ICR
         // Reset the render graph.
         mRenderGraph.clear();
 
-        // Scan 1) Initialize all render passes.
+        // Scan 1) Pre-pass for the common shader.
         for (const auto& renderPassInfo : parsedShaderToy["Shader"]["renderpass"])
         {
-            // Handle the special case of the "Common" file.
-            if (renderPassInfo["name"] == "Common")
-            {
-                // Extract the common shader which is just a fake render pass that
-                // serves as a container for the common shader code.
-                mCommonShaderGLSL = renderPassInfo["code"].get<std::string>();
+            if (renderPassInfo["name"] != "Common")
                 continue;
-            }
 
-            // Initialize the render pass.
-            mRenderPasses.push_back(std::make_unique<RenderPass>(renderPassInfo));
+            // Extract the common shader which is just a fake render pass that
+            // serves as a container for the common shader code.
+            mCommonShaderGLSL = renderPassInfo["code"].get<std::string>();
+            break;
+        }
+
+        // Scan 2) Initialize all render passes.
+        for (const auto& renderPassInfo : parsedShaderToy["Shader"]["renderpass"])
+        {
+            if (renderPassInfo["name"] == "Common")
+                continue;
+
+            try
+            {
+                // NOTE: Will need a prepass to ensure the common file is found first.
+                RenderPass::Args renderPassArgs = { mRootSignature.Get(), renderPassInfo, mCommonShaderGLSL };
+
+                // Initialize the render pass.
+                mRenderPasses.push_back(std::make_unique<RenderPass>(renderPassArgs));
+            }
+            catch (std::runtime_error& e)
+            {
+                spdlog::critical("Failed to initialize render pass: {}", e.what());
+                return false;
+            }
 
             // Get the recently added render pass.
             auto* renderPass = mRenderPasses.back().get();
@@ -191,7 +361,7 @@ namespace ICR
             renderPassTaskMap[renderPass->GetOutputID()] = mRenderGraph.emplace([renderPass]() { renderPass->Dispatch(); });
         }
 
-        // Scan 2) Resolve all render pass dependencies.
+        // Scan 3) Resolve all render pass dependencies.
         for (const auto& renderPass : mRenderPasses)
         {
             for (const auto& inputID : renderPass->GetInputIDs())
@@ -318,9 +488,7 @@ namespace ICR
         return true;
     }
 
-    bool RenderInputShaderToy::CompileShaderToyToGraphicsPSO(const std::string&    shaderID,
-                                                             ID3D12RootSignature** ppRootSignature,
-                                                             ID3D12PipelineState** ppPSO)
+    bool RenderInputShaderToy::CompileShaderToy(const std::string& shaderID)
     {
         // 1) Download the shader toy shader.
         // -----------------------------------
@@ -330,8 +498,6 @@ namespace ICR
         // --------------------------
 
         nlohmann::json parsedData = nlohmann::json::parse(data);
-
-        spdlog::debug(parsedData.dump(4));
 
         // 3) Compile GLSL to SPIR-V.
         // ---------------------------
@@ -346,106 +512,9 @@ namespace ICR
         if (!BuildRenderGraph(parsedData))
             return false;
 
-        // For now, grab the first render pass.
-        auto shaderToySource = parsedData["Shader"]["renderpass"][0]["code"].get<std::string>();
-
-        // Compose a GLSL shader that makes the ShaderToy shader Vulkan-conformant.
-        const char* shaderStrings[3] = { kFragmentShaderShaderToyInputs, shaderToySource.c_str(), kFragmentShaderMainInvocation };
-
-        auto shaderToyFragmentShaderSPIRV = CompileGLSLToSPIRV(shaderStrings, 3, EShLangFragment);
-
-        if (shaderToyFragmentShaderSPIRV.empty())
-            return false;
-
-        // 4) Convert SPIR-V to DXIL.
-        // --------------------------
-
-        std::vector<uint8_t> shaderToyFragmentShaderDXIL;
-        if (!CrossCompileSPIRVToDXIL("main", shaderToyFragmentShaderSPIRV, shaderToyFragmentShaderDXIL))
-            spdlog::error("Failed to convert SPIR-V to DXIL.");
-
-        // 5) Load our matching fullscreen triangle vertex shader DXIL.
-        // ---------------------------
-
-        std::string vertexShaderPath = "C:\\Development\\ImageQualityReference\\Assets\\Shaders\\Compiled\\FullscreenTriangle.vert.dxil";
-
-        std::vector<uint8_t> fullscreenTriangleVertexShaderDXIL;
-        if (!ReadFileBytes(vertexShaderPath, fullscreenTriangleVertexShaderDXIL))
-            return false;
-
-        // 5) Create Graphics PSO.
-        // --------------------------
-
-        std::vector<D3D12_ROOT_PARAMETER> rootParameters;
-        {
-            D3D12_ROOT_PARAMETER rootParameter      = {};
-            rootParameter.ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
-            rootParameter.Descriptor.RegisterSpace  = 0;
-            rootParameter.Descriptor.ShaderRegister = 0;
-            rootParameter.ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
-
-            rootParameters.push_back(rootParameter);
-        }
-
-        D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc = {};
-
-        rootSignatureDesc.Version                = D3D_ROOT_SIGNATURE_VERSION_1_0;
-        rootSignatureDesc.Desc_1_0.NumParameters = static_cast<UINT>(rootParameters.size());
-        rootSignatureDesc.Desc_1_0.pParameters   = rootParameters.data();
-
-        ComPtr<ID3DBlob> pBlobSignature;
-        ComPtr<ID3DBlob> pBlobError;
-        if (FAILED(D3D12SerializeVersionedRootSignature(&rootSignatureDesc, &pBlobSignature, &pBlobError)))
-        {
-            if (pBlobError)
-                spdlog::error((static_cast<char*>(pBlobError->GetBufferPointer())));
-
-            return false;
-        }
-
-        ThrowIfFailed(gLogicalDevice->CreateRootSignature(0,
-                                                          pBlobSignature->GetBufferPointer(),
-                                                          pBlobSignature->GetBufferSize(),
-                                                          IID_PPV_ARGS(ppRootSignature)));
-
-        D3D12_BLEND_DESC blendDesc               = {};
-        blendDesc.AlphaToCoverageEnable          = FALSE;
-        blendDesc.IndependentBlendEnable         = FALSE;
-        blendDesc.RenderTarget[0].BlendEnable    = FALSE;
-        blendDesc.RenderTarget[0].LogicOpEnable  = FALSE;
-        blendDesc.RenderTarget[0].SrcBlend       = D3D12_BLEND_ONE;
-        blendDesc.RenderTarget[0].DestBlend      = D3D12_BLEND_ZERO;
-        blendDesc.RenderTarget[0].BlendOp        = D3D12_BLEND_OP_ADD;
-        blendDesc.RenderTarget[0].SrcBlendAlpha  = D3D12_BLEND_ONE;
-        blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
-        blendDesc.RenderTarget[0].BlendOpAlpha   = D3D12_BLEND_OP_ADD;
-        blendDesc.RenderTarget[0].LogicOp        = D3D12_LOGIC_OP_NOOP;
-        blendDesc.RenderTarget[0].RenderTargetWriteMask =
-            D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN | D3D12_COLOR_WRITE_ENABLE_BLUE | D3D12_COLOR_WRITE_ENABLE_ALPHA;
-
-        D3D12_GRAPHICS_PIPELINE_STATE_DESC shaderToyPSOInfo = {};
-        {
-            shaderToyPSOInfo.PS                       = { shaderToyFragmentShaderDXIL.data(), shaderToyFragmentShaderDXIL.size() };
-            shaderToyPSOInfo.VS                       = { fullscreenTriangleVertexShaderDXIL.data(), fullscreenTriangleVertexShaderDXIL.size() };
-            shaderToyPSOInfo.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
-            shaderToyPSOInfo.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-            shaderToyPSOInfo.RasterizerState.MultisampleEnable = FALSE;
-            shaderToyPSOInfo.BlendState                        = blendDesc;
-            shaderToyPSOInfo.PrimitiveTopologyType             = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-            shaderToyPSOInfo.SampleMask                        = UINT_MAX;
-            shaderToyPSOInfo.NumRenderTargets                  = 1;
-            shaderToyPSOInfo.RTVFormats[0]                     = DXGI_FORMAT_R8G8B8A8_UNORM;
-            shaderToyPSOInfo.SampleDesc.Count                  = 1;
-            shaderToyPSOInfo.pRootSignature                    = *ppRootSignature;
-        }
-
-        // Compile the PSO in the driver.
-        ThrowIfFailed(gLogicalDevice->CreateGraphicsPipelineState(&shaderToyPSOInfo, IID_PPV_ARGS(ppPSO)));
-
-        return true;
+        // TEMP
+        return false;
     }
-
-    void ProcessShaderToyRequestAsync() {}
 
     void RenderInputShaderToy::RenderInterface()
     {
