@@ -10,25 +10,36 @@ namespace ICR
     {
     public:
 
+        class MediaCache
+        {
+        };
+
+        class RenderPass
+        {
+        public:
+
+            RenderPass(const nlohmann::json& renderPassInfo);
+
+            void Dispatch();
+
+            inline const int&              GetOutputID() const { return mOutputID; }
+            inline const std::vector<int>& GetInputIDs() const { return mInputIDs; }
+            inline ID3D12Resource*         GetOutputResource() const { return mOutputResource.Get(); }
+
+        private:
+
+            int                         mOutputID;
+            std::vector<int>            mInputIDs;
+            ComPtr<ID3D12PipelineState> mPSO;
+            ComPtr<ID3D12Resource>      mOutputResource;
+        };
+
         enum AsyncCompileShaderToyStatus
         {
             Idle,
             Compiling,
             Compiled,
             Failed
-        };
-
-        struct Buffer
-        {
-            ComPtr<ID3D12Resource>      resource;
-            ComPtr<D3D12MA::Allocation> allocation;
-        };
-
-        struct RenderPass
-        {
-            int                         output;
-            std::array<int, 4>          inputs;
-            ComPtr<ID3D12PipelineState> pso;
         };
 
         struct Constants
@@ -60,8 +71,15 @@ namespace ICR
 
     private:
 
+        bool CompileShaderToyToGraphicsPSO(const std::string& shaderID, ID3D12RootSignature** ppRootSignature, ID3D12PipelineState** ppPSO);
+        bool BuildRenderGraph(const nlohmann::json& parsedShaderToy);
+
+        tf::Taskflow                             mRenderGraph;
+        std::string                              mCommonShaderGLSL;
+        std::vector<std::unique_ptr<RenderPass>> mRenderPasses;
         std::string                              mShaderID;
-        bool                                     mInitialized = false;
+        MediaCache                               mMediaCache;
+        bool                                     mInitialized;
         ComPtr<ID3D12PipelineState>              mPSO;
         ComPtr<ID3D12Resource>                   mUBO;
         ComPtr<ID3D12DescriptorHeap>             mUBOHeap;

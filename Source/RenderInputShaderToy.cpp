@@ -5,19 +5,35 @@
 namespace ICR
 {
 
-    RenderInputShaderToy::RenderInputShaderToy() : mShaderID(256, '\0'), mUserRequestUnload(false)
+    // Render Pass
+    // -------------------------------------------------
+
+    RenderInputShaderToy::RenderPass::RenderPass(const nlohmann::json& renderPassInfo)
+    {
+        // Resolve the output ID.
+        // WARNING: Currently ShaderToy does not support MRT, so we assume there will only ever be one output per-pass.
+        mOutputID = renderPassInfo["outputs"][0]["id"].get<int>();
+
+        // Resolve the input IDs.
+        for (const auto& input : renderPassInfo["inputs"])
+            mInputIDs.push_back(input["id"].get<int>());
+    }
+
+    void RenderInputShaderToy::RenderPass::Dispatch() { spdlog::info("Dispatching RenderPass: Output ID: {}", mOutputID); }
+
+    // -------------------------------------------------
+
+    RenderInputShaderToy::RenderInputShaderToy() : mShaderID(256, '\0'), mInitialized(false), mUserRequestUnload(false)
     {
         // Initialize the shadertoy to a known-good one.
         // "Raymarching - Primitives" https://www.shadertoy.com/view/Xds3zN
-        memcpy(mShaderID.data(), "Xds3zN", 6);
+        memcpy(mShaderID.data(), "lscBW4", 6);
 
         // Initial async compile state.
         mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Idle);
     }
 
     RenderInputShaderToy::~RenderInputShaderToy() {}
-
-    bool CompileShaderToyToGraphicsPSO(const std::string& shaderID, ID3D12RootSignature** ppRootSignature, ID3D12PipelineState** ppPSO);
 
     void RenderInputShaderToy::Initialize()
     {
@@ -76,6 +92,9 @@ namespace ICR
             constantBufferViewDesc.SizeInBytes    = sizeof(Constants);
         }
         gLogicalDevice->CreateConstantBufferView(&constantBufferViewDesc, mUBOHeap->GetCPUDescriptorHandleForHeapStart());
+
+        // Compile
+        // ---------------------------
 
         // Set am idle compile status before attempting anything.
         mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Idle);
@@ -142,8 +161,57 @@ namespace ICR
 
     constexpr const char* kUnsupportedInputs[1] = { "keyboard" };
 
-    bool BuildRenderGraph(const nlohmann::json& parsedShaderToy)
+    bool RenderInputShaderToy::BuildRenderGraph(const nlohmann::json& parsedShaderToy)
     {
+        // Intermediate memory for tracking renderpass dependencies.
+        std::unordered_map<int, tf::Task> renderPassTaskMap;
+
+        // Reset the render graph.
+        mRenderGraph.clear();
+
+        // Scan 1) Initialize all render passes.
+        for (const auto& renderPassInfo : parsedShaderToy["Shader"]["renderpass"])
+        {
+            // Handle the special case of the "Common" file.
+            if (renderPassInfo["name"] == "Common")
+            {
+                // Extract the common shader which is just a fake render pass that
+                // serves as a container for the common shader code.
+                mCommonShaderGLSL = renderPassInfo["code"].get<std::string>();
+                continue;
+            }
+
+            // Initialize the render pass.
+            mRenderPasses.push_back(std::make_unique<RenderPass>(renderPassInfo));
+
+            // Get the recently added render pass.
+            auto* renderPass = mRenderPasses.back().get();
+
+            // Insert the render pass into the render graph.
+            renderPassTaskMap[renderPass->GetOutputID()] = mRenderGraph.emplace([renderPass]() { renderPass->Dispatch(); });
+        }
+
+        // Scan 2) Resolve all render pass dependencies.
+        for (const auto& renderPass : mRenderPasses)
+        {
+            for (const auto& inputID : renderPass->GetInputIDs())
+            {
+                // Skip inputs that are not provided from other render passes.
+                if (!renderPassTaskMap.contains(inputID))
+                    continue;
+
+                // Skip self-referential inputs.
+                if (inputID == renderPass->GetOutputID())
+                    continue;
+
+                renderPassTaskMap[inputID].precede(renderPassTaskMap[renderPass->GetOutputID()]);
+            }
+        }
+
+        tf::Executor executor;
+        executor.run(mRenderGraph).wait();
+
+#if 0
         // Pass 1) Parse all non-buffer inputs.
         // ---------------------------------
 
@@ -245,11 +313,14 @@ namespace ICR
 
             spdlog::info("Upload complete!");
         }
+#endif
 
         return true;
     }
 
-    bool CompileShaderToyToGraphicsPSO(const std::string& shaderID, ID3D12RootSignature** ppRootSignature, ID3D12PipelineState** ppPSO)
+    bool RenderInputShaderToy::CompileShaderToyToGraphicsPSO(const std::string&    shaderID,
+                                                             ID3D12RootSignature** ppRootSignature,
+                                                             ID3D12PipelineState** ppPSO)
     {
         // 1) Download the shader toy shader.
         // -----------------------------------
