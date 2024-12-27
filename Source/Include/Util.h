@@ -245,7 +245,7 @@ namespace ICR
     T QueryURL(const std::string& url);
 
     // Compile GLSL to SPIR-V using glslang (empty if failed).
-    std::vector<uint32_t> CompileGLSLToSPIRV(const char** sources, int sourceCount, EShLanguage stage);
+    std::vector<uint32_t> CompileGLSLToSPIRV(const char** sources, int sourceCount, EShLanguage stage, const char* preamble = nullptr);
 
     // Cross compiles a SPIR-V module to DXIL.
     bool CrossCompileSPIRVToDXIL(const std::string& entryPoint, const std::vector<uint32_t>& spirv, std::vector<uint8_t>& dxil);

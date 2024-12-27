@@ -79,7 +79,53 @@ namespace ICR
                                              renderPassSourceCodeGLSL.c_str(),
                                              kFragmentShaderMainInvocation };
 
-            auto renderPassSPIRV = CompileGLSLToSPIRV(shaderStrings, 4, EShLangFragment);
+            // Build a preamble that defines the correct sampler types for each channel.
+            std::stringstream preambleStream;
+            {
+                preambleStream << std::endl;
+
+                // Shadertoy supports max of 4 input channels.
+                for (int samplerIndex = 0; samplerIndex < 4; samplerIndex++)
+                {
+                    preambleStream << std::format("#define SAMPLER_TYPE{} ", samplerIndex);
+
+                    bool sampleIndexHasInput = false;
+
+                    // Scan the inputs for non-2d samplers.
+                    for (const auto& input : args.renderPassInfo["inputs"])
+                    {
+                        if (input["channel"].get<int>() == samplerIndex)
+                        {
+                            auto inputType = input["ctype"].get<std::string>();
+
+                            if (inputType == "volume")
+                                preambleStream << "sampler3D";
+
+                            if (inputType == "cubemap")
+                                preambleStream << "samplerCube";
+
+                            if (inputType == "buffer" || inputType == "texture")
+                                preambleStream << "sampler2D";
+
+                            sampleIndexHasInput = true;
+
+                            break;
+                        }
+                    }
+
+                    if (!sampleIndexHasInput)
+                    {
+                        // Default to 2D.
+                        preambleStream << "sampler2D";
+                    }
+
+                    preambleStream << std::endl;
+                }
+            }
+
+            spdlog::info(preambleStream.str());
+
+            auto renderPassSPIRV = CompileGLSLToSPIRV(shaderStrings, ARRAYSIZE(shaderStrings), EShLangFragment, preambleStream.str().c_str());
 
             if (renderPassSPIRV.empty())
                 throw std::runtime_error("Failed to compile GLSL to SPIR-V.");

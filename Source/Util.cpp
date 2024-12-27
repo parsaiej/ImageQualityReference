@@ -163,7 +163,7 @@ namespace ICR
     template std::string          QueryURL<std::string>(const std::string& url);
     template std::vector<uint8_t> QueryURL<std::vector<uint8_t>>(const std::string& url);
 
-    std::vector<uint32_t> CompileGLSLToSPIRV(const char** pSources, int sourceCount, EShLanguage stage)
+    std::vector<uint32_t> CompileGLSLToSPIRV(const char** pSources, int sourceCount, EShLanguage stage, const char* preamble)
     {
         glslang::TShader shader(stage);
 
@@ -175,14 +175,8 @@ namespace ICR
         shader.setEnvClient(glslang::EShClientVulkan, glslang::EShTargetVulkan_1_3);
         shader.setEnvTarget(glslang::EShTargetSpv, glslang::EShTargetSpv_1_6);
 
-        shader.setPreamble(R"(
-        
-            #define SAMPLER_TYPE0 samplerCube
-            #define SAMPLER_TYPE1 sampler2D
-            #define SAMPLER_TYPE2 sampler2D
-            #define SAMPLER_TYPE3 sampler2D
-        
-        )");
+        if (preamble != nullptr)
+            shader.setPreamble(preamble);
 
         if (!shader.parse(GetDefaultResources(), 450, true, EShMsgEnhanced))
         {
