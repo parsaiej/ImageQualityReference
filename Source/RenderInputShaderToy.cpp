@@ -187,6 +187,8 @@ namespace ICR
             }
 
             mInputIDs.push_back(input["id"].get<int>());
+
+            mInputToChannelMap[mInputIDs.back()] = input["channel"].get<int>();
         }
 
         // Compile PSO.
@@ -325,16 +327,15 @@ namespace ICR
 
         for (int frameIndex = 0; frameIndex < 2; frameIndex++)
         {
-            // Obtain a handle to the first sampler.
-            CD3DX12_CPU_DESCRIPTOR_HANDLE resourceDescriptorHandle(mInputResourceDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-
-            // Offset w.r.t. the frame index.
-            resourceDescriptorHandle.Offset(frameIndex * 4, gSRVDescriptorSize);
-
             for (int inputID : mInputIDs) // NOTE: Should never exceed 4.
             {
                 if (!resourceCache.contains(inputID))
                     throw std::runtime_error("Input resource not found in cache.");
+
+                // Generate a pointer to the resource descriptor.
+                CD3DX12_CPU_DESCRIPTOR_HANDLE resourceDescriptorHandle(mInputResourceDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+                                                                       (4 * frameIndex) + mInputToChannelMap[inputID],
+                                                                       gSRVDescriptorSize);
 
                 // Create SRV for the resource.
                 // ------------------------------------------------
@@ -348,15 +349,16 @@ namespace ICR
                     srvDesc.Texture2D.MipLevels       = 1;
                 }
                 gLogicalDevice->CreateShaderResourceView(resourceCache.at(inputID), &srvDesc, resourceDescriptorHandle);
-
-                // Advance pointer to the next sampler descriptor.
-                resourceDescriptorHandle.Offset(1, gSRVDescriptorSize);
             }
         }
     }
 
+    static std::mutex gRenderPassCommandMutex;
+
     void RenderPass::Dispatch(ID3D12GraphicsCommandList* pCmd)
     {
+        std::lock_guard<std::mutex> lock(gRenderPassCommandMutex);
+
         // Bind the output render target.
         // ------------------------------------------------
         CD3DX12_CPU_DESCRIPTOR_HANDLE outputRenderTarget(mOutputResourceDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
@@ -586,7 +588,7 @@ namespace ICR
         // Parse all non-buffer inputs.
         // ---------------------------------
 
-        std::unordered_map<int, std::string> inputTextureURLs;
+        std::vector<nlohmann::json> mediaInputs;
 
         for (const auto& renderPass : parsedShaderToy["Shader"]["renderpass"])
         {
@@ -602,27 +604,31 @@ namespace ICR
                 }
 
                 if (inputType == "texture" || inputType == "cubemap")
-                    inputTextureURLs[input["id"]] = input["src"].get<std::string>();
+                    mediaInputs.push_back(input);
             }
         }
 
         // Obtain any media from server.
         // ---------------------------------
 
-        for (const auto& inputTextureURL : inputTextureURLs)
+        std::unordered_set<int> processedInputs;
+
+        for (const auto& mediaInput : mediaInputs)
         {
-            spdlog::debug("Fetching media: {}", inputTextureURL);
+            int mediaInputId = mediaInput["id"].get<int>();
+
+            if (processedInputs.contains(mediaInputId))
+                continue;
+
+            processedInputs.insert(mediaInputId);
 
             // Pull image bytes from the API.
             // ------------------------------
 
-            auto data = QueryURL<std::vector<uint8_t>>("https://www.shadertoy.com" + inputTextureURL.second);
+            auto data = QueryURL<std::vector<uint8_t>>("https://www.shadertoy.com" + mediaInput["src"].get<std::string>());
 
             if (data.empty())
-            {
-                spdlog::error("Failed to fetch media: {}", inputTextureURL);
                 return false;
-            }
 
             // Load the image
             // ------------------------------
@@ -686,7 +692,7 @@ namespace ICR
             mMediaResources.push_back(std::move(dedicatedMemory));
 
             // And specify it here.
-            mResourceCache[inputTextureURL.first] = mMediaResources.back().resource.Get();
+            mResourceCache[mediaInputId] = mMediaResources.back().resource.Get();
         }
 #endif
 
@@ -840,8 +846,6 @@ namespace ICR
     {
         if (!mInitialized)
             return;
-
-        return;
 
         // Check Shadertoy compile status.
         switch (mAsyncCompileStatus.load())

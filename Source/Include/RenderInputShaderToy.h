@@ -48,6 +48,7 @@ namespace ICR
             ComPtr<ID3D12DescriptorHeap>  mOutputResourceDescriptorHeap;
             std::vector<uint32_t>         mSPIRV;
             std::array<DeviceResource, 2> mOutputTargets;
+            std::unordered_map<int, int>  mInputToChannelMap;
         };
 
         enum AsyncCompileShaderToyStatus
