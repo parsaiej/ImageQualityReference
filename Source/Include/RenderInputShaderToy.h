@@ -29,16 +29,20 @@ namespace ICR
 
             void Dispatch(ID3D12GraphicsCommandList* pCmd);
 
-            inline const int&              GetOutputID() const { return mOutputID; }
-            inline const std::vector<int>& GetInputIDs() const { return mInputIDs; }
-            inline ID3D12Resource*         GetOutputResource() const { return mOutputResource.Get(); }
+            inline const int&                   GetOutputID() const { return mOutputID; }
+            inline const std::vector<int>&      GetInputIDs() const { return mInputIDs; }
+            inline const std::vector<uint32_t>& GetSPIRV() const { return mSPIRV; }
+            inline ID3D12Resource*              GetOutputResource() const { return mOutputResource.Get(); }
 
         private:
 
-            int                         mOutputID;
-            std::vector<int>            mInputIDs;
-            ComPtr<ID3D12PipelineState> mPSO;
-            ComPtr<ID3D12Resource>      mOutputResource;
+            int                          mOutputID;
+            std::vector<int>             mInputIDs;
+            ComPtr<ID3D12PipelineState>  mPSO;
+            ComPtr<ID3D12Resource>       mOutputResource;
+            ComPtr<ID3D12DescriptorHeap> mInputSamplerDescriptorHeap;
+            ComPtr<ID3D12DescriptorHeap> mInputResourceDescriptorHeap;
+            std::vector<uint32_t>        mSPIRV;
         };
 
         enum AsyncCompileShaderToyStatus
@@ -80,6 +84,10 @@ namespace ICR
 
         bool CompileShaderToy(const std::string& shaderID);
         bool BuildRenderGraph(const nlohmann::json& parsedShaderToy);
+
+#ifdef _DEBUG
+        nlohmann::json mShaderAPIRequestResult;
+#endif
 
         tf::Taskflow                             mRenderGraph;
         std::string                              mCommonShaderGLSL;

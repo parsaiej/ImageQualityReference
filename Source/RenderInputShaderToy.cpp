@@ -136,21 +136,23 @@ namespace ICR
                 }
             }
 
-            auto renderPassSPIRV = CompileGLSLToSPIRV(shaderStrings, ARRAYSIZE(shaderStrings), EShLangFragment, preambleStream.str().c_str());
+            // Cache the SPIR-V in case user requests decompiled HLSL.
+            mSPIRV = CompileGLSLToSPIRV(shaderStrings, ARRAYSIZE(shaderStrings), EShLangFragment, preambleStream.str().c_str());
 
-            if (renderPassSPIRV.empty())
+            if (mSPIRV.empty())
                 throw std::runtime_error("Failed to compile GLSL to SPIR-V.");
 
             // 2) Convert SPIR-V to DXIL.
             // --------------------------
 
             std::vector<uint8_t> renderPassDXIL;
-            if (!CrossCompileSPIRVToDXIL("main", renderPassSPIRV, renderPassDXIL))
+            if (!CrossCompileSPIRVToDXIL("main", mSPIRV, renderPassDXIL))
                 throw std::runtime_error("Failed to cross-compile SPIR-V to DXIL.");
 
             // 3) Load our matching fullscreen triangle vertex shader DXIL.
             // ---------------------------
 
+            // TODO: Relative path.
             std::string vertexShaderPath = "C:\\Development\\ImageQualityReference\\Assets\\Shaders\\Compiled\\FullscreenTriangle.vert.dxil";
 
             std::vector<uint8_t> fullscreenTriangleVertexShaderDXIL;
@@ -199,6 +201,10 @@ namespace ICR
 
     void RenderInputShaderToy::RenderPass::Dispatch(ID3D12GraphicsCommandList* pCmd)
     {
+        ID3D12DescriptorHeap* ppHeaps[] = { mInputResourceDescriptorHeap.Get(), mInputSamplerDescriptorHeap.Get() };
+        pCmd->SetDescriptorHeaps(ARRAYSIZE(ppHeaps), ppHeaps);
+        pCmd->SetGraphicsRootDescriptorTable(1, mInputResourceDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+        pCmd->SetGraphicsRootDescriptorTable(2, mInputSamplerDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
         pCmd->SetPipelineState(mPSO.Get());
         pCmd->DrawInstanced(3U, 1U, 0U, 0U);
     }
@@ -562,6 +568,11 @@ namespace ICR
 
         nlohmann::json parsedData = nlohmann::json::parse(data);
 
+#ifdef _DEBUG
+        // Keep the result in debug builds for optional viewing.
+        mShaderAPIRequestResult = parsedData;
+#endif
+
         // 3) Compile GLSL to SPIR-V.
         // ---------------------------
 
@@ -618,12 +629,48 @@ namespace ICR
                     });
             }
 
+#ifdef _DEBUG
+            if (!mShaderAPIRequestResult.empty())
+            {
+                if (ImGui::Button("Log API Request Result", ImVec2(ImGui::GetContentRegionAvail().x, 0)))
+                    spdlog::info(mShaderAPIRequestResult.dump(4));
+            }
+#endif
+
             do
             {
                 if (mAsyncCompileStatus.load() != AsyncCompileShaderToyStatus::Compiled)
                     break;
 
-                if (ImGui::Button("Modify", ImVec2(ImGui::GetContentRegionAvail().x, 0))) {}
+                if (ImGui::Button("Write HLSL to Disk", ImVec2(ImGui::GetContentRegionAvail().x, 0)))
+                {
+                    for (const auto& renderPass : mRenderPasses)
+                    {
+                        if (renderPass->GetSPIRV().empty())
+                            continue;
+
+                        spirv_cross::CompilerHLSL compiler(renderPass->GetSPIRV());
+
+                        spirv_cross::CompilerHLSL::Options compileOptions;
+                        {
+                            // Request SM 6.0 compliant.
+                            compileOptions.shader_model = 60;
+                        }
+                        compiler.set_hlsl_options(compileOptions);
+
+                        // Decompile the render pass SPIR-V to HLSL.
+                        auto hlsl = compiler.compile();
+
+                        // Write the HLSL code to a file.
+                        std::ofstream file(std::format("{}-renderpass-{}.hlsl", mShaderID.substr(0, 6), renderPass->GetOutputID()));
+
+                        if (!file.is_open())
+                            break;
+
+                        file << hlsl;
+                        file.close();
+                    }
+                }
             }
             while (false);
         }
@@ -636,7 +683,9 @@ namespace ICR
         if (!mInitialized)
             return;
 
-        // Check PSO compile status.
+        return;
+
+        // Check Shadertoy compile status.
         switch (mAsyncCompileStatus.load())
         {
             case AsyncCompileShaderToyStatus::Compiling:
@@ -692,6 +741,11 @@ namespace ICR
     {
         if (!mInitialized)
             return;
+
+        mShaderAPIRequestResult.clear();
+        mRenderGraph.clear();
+        mRenderPasses.clear();
+        mCommonShaderGLSL.clear();
 
         mUBO->Unmap(0, nullptr);
         mUBOAllocation.Reset();

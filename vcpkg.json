@@ -12,6 +12,7 @@
       "curl",
       "glslang",
       "nlohmann-json",
+      "spirv-cross",
       "d3d12-memory-allocator"
     ]
   }

@@ -775,8 +775,8 @@ void InitializeGraphicsRuntime()
     // ------------------------------------------
 
     {
-        spdlog::info("Device: {}", gDXGIAdapterNames[gDXGIAdapterIndex]);
-        spdlog::info("VRAM:   {} GB", gDXGIAdapterInfos[gDXGIAdapterIndex].DedicatedVideoMemory / static_cast<float>(1024 * 1024 * 1024));
+        auto vram = gDXGIAdapterInfos[gDXGIAdapterIndex].DedicatedVideoMemory / static_cast<float>(1024 * 1024 * 1024);
+        spdlog::info("Device: {} ({:.2f} GB)", gDXGIAdapterNames[gDXGIAdapterIndex], vram);
     }
 
     if (gRenderInput)

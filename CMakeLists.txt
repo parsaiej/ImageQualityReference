@@ -34,6 +34,9 @@ find_package(Taskflow               CONFIG REQUIRED)
 find_package(d3d12-memory-allocator CONFIG REQUIRED)
 find_package(glslang                CONFIG REQUIRED)
 find_package(nlohmann_json          CONFIG REQUIRED)
+find_package(spirv_cross_core       CONFIG REQUIRED)
+find_package(spirv_cross_glsl       CONFIG REQUIRED)
+find_package(spirv_cross_hlsl       CONFIG REQUIRED)
 find_package(CURL                          REQUIRED)
 find_package(Stb                           REQUIRED)
 
@@ -51,7 +54,7 @@ add_executable(ImageQualityReference WIN32
 # Compile Options
 # --------------------------------
 
-target_compile_options(ImageQualityReference PRIVATE /W4 /WX)
+# target_compile_options(ImageQualityReference PRIVATE /W4 /WX)
 
 # PCH
 # --------------------------------
@@ -95,6 +98,9 @@ target_link_libraries(ImageQualityReference PRIVATE
     glslang::SPIRV
     nlohmann_json::nlohmann_json
     synchronization.lib
+    spirv-cross-core
+    spirv-cross-glsl
+    spirv-cross-hlsl
     ${CMAKE_SOURCE_DIR}/External/spirv-to-dxil/lib/x64/${CMAKE_BUILD_TYPE}/libspirv_to_dxil.lib
 )
 
