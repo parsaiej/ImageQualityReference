@@ -229,10 +229,8 @@ namespace ICR
         // 5) Load our matching fullscreen triangle vertex shader DXIL.
         // ---------------------------
 
-        std::string vertexShaderPath = "C:\\Development\\ImageQualityReference\\Assets\\Shaders\\Compiled\\FullscreenTriangle.vert.dxil";
-
         std::vector<uint8_t> fullscreenTriangleVertexShaderDXIL;
-        if (!ReadFileBytes(vertexShaderPath, fullscreenTriangleVertexShaderDXIL))
+        if (!ReadFileBytes("Shaders\\FullscreenTriangle.vert.dxil", fullscreenTriangleVertexShaderDXIL))
             return false;
 
         // 5) Create Graphics PSO.
