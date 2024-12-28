@@ -678,7 +678,7 @@ namespace ICR
             ExecuteCommandListAndWait(
                 gLogicalDevice.Get(),
                 gCommandQueue.Get(),
-                [=](ID3D12GraphicsCommandList* pCmd)
+                [&](ID3D12GraphicsCommandList* pCmd)
                 {
                     D3D12_SUBRESOURCE_DATA subresourceData = {};
                     subresourceData.pData                  = pImage;
