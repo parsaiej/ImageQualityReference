@@ -33,6 +33,7 @@ namespace ICR
     int gCurrentSwapChainImageIndex;
     int gRTVDescriptorSize;
     int gSRVDescriptorSize;
+    int gSMPDescriptorSize;
 
     ComPtr<ID3D12Device>              gLogicalDevice              = nullptr;
     ComPtr<IDSRDevice>                gDSRDevice                  = nullptr;
@@ -677,6 +678,7 @@ void InitializeGraphicsRuntime()
     // Determine the size of descriptor type stride.
     gRTVDescriptorSize = gLogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
     gSRVDescriptorSize = gLogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    gSMPDescriptorSize = gLogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
 
     // Descriptor heaps.
     // ------------------------------------------

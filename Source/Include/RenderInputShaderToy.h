@@ -1,6 +1,7 @@
 #ifndef RENDER_INPUT_SHADER_TOY_H
 #define RENDER_INPUT_SHADER_TOY_H
 
+#include <Util.h>
 #include <RenderInput.h>
 
 namespace ICR
@@ -27,6 +28,8 @@ namespace ICR
 
             RenderPass(const Args& args);
 
+            void CreateInputResourceDescriptorTable(const std::unordered_map<int, ID3D12Resource*>& resourceCache);
+
             void Dispatch(ID3D12GraphicsCommandList* pCmd);
 
             inline const int&                   GetOutputID() const { return mOutputID; }
@@ -36,13 +39,15 @@ namespace ICR
 
         private:
 
-            int                          mOutputID;
-            std::vector<int>             mInputIDs;
-            ComPtr<ID3D12PipelineState>  mPSO;
-            ComPtr<ID3D12Resource>       mOutputResource;
-            ComPtr<ID3D12DescriptorHeap> mInputSamplerDescriptorHeap;
-            ComPtr<ID3D12DescriptorHeap> mInputResourceDescriptorHeap;
-            std::vector<uint32_t>        mSPIRV;
+            int                           mOutputID;
+            std::vector<int>              mInputIDs;
+            ComPtr<ID3D12PipelineState>   mPSO;
+            ComPtr<ID3D12Resource>        mOutputResource;
+            ComPtr<ID3D12DescriptorHeap>  mInputSamplerDescriptorHeap;
+            ComPtr<ID3D12DescriptorHeap>  mInputResourceDescriptorHeap;
+            ComPtr<ID3D12DescriptorHeap>  mOutputResourceDescriptorHeap;
+            std::vector<uint32_t>         mSPIRV;
+            std::array<DeviceResource, 2> mOutputTargets;
         };
 
         enum AsyncCompileShaderToyStatus
@@ -76,6 +81,7 @@ namespace ICR
         ~RenderInputShaderToy();
 
         void Initialize() override;
+        void ResizeViewportTargets(const DirectX::XMINT2& dim) override;
         void Render(const FrameParams& frameParams) override;
         void RenderInterface() override;
         void Release() override;
@@ -89,6 +95,10 @@ namespace ICR
         nlohmann::json mShaderAPIRequestResult;
 #endif
 
+        DeviceResource               mUBO;
+        ComPtr<ID3D12DescriptorHeap> mUBOHeap;
+        void*                        mpUBOData;
+
         tf::Taskflow                             mRenderGraph;
         std::string                              mCommonShaderGLSL;
         ID3D12GraphicsCommandList*               mpActiveCommandList;
@@ -97,13 +107,11 @@ namespace ICR
         MediaCache                               mMediaCache;
         bool                                     mInitialized;
         ComPtr<ID3D12PipelineState>              mPSO;
-        ComPtr<ID3D12Resource>                   mUBO;
-        ComPtr<D3D12MA::Allocation>              mUBOAllocation;
-        ComPtr<ID3D12DescriptorHeap>             mUBOHeap;
-        void*                                    mpUBOData;
         ComPtr<ID3D12RootSignature>              mRootSignature;
         std::atomic<AsyncCompileShaderToyStatus> mAsyncCompileStatus;
         bool                                     mUserRequestUnload;
+        std::unordered_map<int, ID3D12Resource*> mResourceCache;
+        std::vector<DeviceResource>              mMediaResources;
     };
 } // namespace ICR
 

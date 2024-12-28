@@ -21,10 +21,11 @@ namespace ICR
     {
     public:
 
-        virtual void Initialize()                           = 0;
-        virtual void Render(const FrameParams& frameParams) = 0;
-        virtual void RenderInterface()                      = 0;
-        virtual void Release()                              = 0;
+        virtual void Initialize()                                      = 0;
+        virtual void ResizeViewportTargets(const DirectX::XMINT2& dim) = 0;
+        virtual void Render(const FrameParams& frameParams)            = 0;
+        virtual void RenderInterface()                                 = 0;
+        virtual void Release()                                         = 0;
     };
 
 } // namespace ICR

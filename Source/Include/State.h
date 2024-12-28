@@ -16,6 +16,7 @@ namespace ICR
     extern int                                    gCurrentSwapChainImageIndex;
     extern int                                    gRTVDescriptorSize;
     extern int                                    gSRVDescriptorSize;
+    extern int                                    gSMPDescriptorSize;
     extern ComPtr<ID3D12Device>                   gLogicalDevice;
     extern ComPtr<IDSRDevice>                     gDSRDevice;
     extern ComPtr<ID3D12CommandQueue>             gCommandQueue;

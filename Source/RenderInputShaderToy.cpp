@@ -4,6 +4,9 @@
 
 namespace ICR
 {
+    // For managing of history buffers, we keep an internal counter here and use it to flip current + history buffers.
+    uint32_t gInternalFrameIndex = 0;
+
     constexpr const char* kFragmentShaderShaderToyInputs = R"(
 
         layout (set = 0, binding = 0) uniform UBO
@@ -66,7 +69,87 @@ namespace ICR
         // WARNING: Currently ShaderToy does not support MRT, so we assume there will only ever be one output per-pass.
         mOutputID = args.renderPassInfo["outputs"][0]["id"].get<int>();
 
+        // Create output resources.
+        // ------------------------------------------------
+        {
+            // Create RTV heap for the output.
+            // ------------------------------------------------
+
+            D3D12_DESCRIPTOR_HEAP_DESC outputDescriptorHeapInfo = {};
+            {
+                outputDescriptorHeapInfo.NumDescriptors = 2;
+                outputDescriptorHeapInfo.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
+            }
+            ThrowIfFailed(gLogicalDevice->CreateDescriptorHeap(&outputDescriptorHeapInfo, IID_PPV_ARGS(&mOutputResourceDescriptorHeap)));
+
+            // Create viewport-sized buffers (current + prev.)
+            // ------------------------------------------------
+            const float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+
+            auto CreateOutputColorBuffer = [&](DeviceResource& viewportSizedColorBuffer)
+            {
+                viewportSizedColorBuffer.resourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM,
+                                                                                     static_cast<UINT>(gViewport.Width),
+                                                                                     static_cast<UINT>(gViewport.Height),
+                                                                                     1,
+                                                                                     1,
+                                                                                     1,
+                                                                                     0,
+                                                                                     D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
+
+                viewportSizedColorBuffer.allocationDesc = { D3D12MA::ALLOCATION_FLAG_NONE, D3D12_HEAP_TYPE_DEFAULT };
+
+                D3D12_CLEAR_VALUE clearValue = {};
+                clearValue.Format            = DXGI_FORMAT_R8G8B8A8_UNORM;
+                memcpy(clearValue.Color, clearColor, sizeof(clearColor));
+
+                ThrowIfFailed(gMemoryAllocator->CreateResource(&viewportSizedColorBuffer.allocationDesc,
+                                                               &viewportSizedColorBuffer.resourceDesc,
+                                                               D3D12_RESOURCE_STATE_RENDER_TARGET,
+                                                               &clearValue,
+                                                               &viewportSizedColorBuffer.allocation,
+                                                               IID_PPV_ARGS(&viewportSizedColorBuffer.resource)));
+            };
+
+            CreateOutputColorBuffer(mOutputTargets[0]);
+            CreateOutputColorBuffer(mOutputTargets[1]);
+
+            // Create RTVs for the output.
+            // ------------------------------------------------
+
+            CD3DX12_CPU_DESCRIPTOR_HANDLE outputDescriptorHandle(mOutputResourceDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+
+            for (auto& outputTarget : mOutputTargets)
+            {
+                gLogicalDevice->CreateRenderTargetView(outputTarget.resource.Get(), nullptr, outputDescriptorHandle);
+
+                // Clear the render target to black.
+                ExecuteCommandListAndWait(gLogicalDevice.Get(),
+                                          gCommandQueue.Get(),
+                                          [&](ID3D12GraphicsCommandList* pCmd)
+                                          { pCmd->ClearRenderTargetView(outputDescriptorHandle, clearColor, 0, nullptr); });
+
+                outputDescriptorHandle.Offset(1, gRTVDescriptorSize);
+            }
+        }
+
+        // Create a descriptor heap for 4 samplers
+        // ------------------------------------------------
+
+        D3D12_DESCRIPTOR_HEAP_DESC samplerHeapInfo = {};
+        {
+            samplerHeapInfo.NumDescriptors = 4;
+            samplerHeapInfo.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;
+            samplerHeapInfo.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        }
+        ThrowIfFailed(gLogicalDevice->CreateDescriptorHeap(&samplerHeapInfo, IID_PPV_ARGS(&mInputSamplerDescriptorHeap)));
+
+        // Obtain a handle to the first sampler.
+        CD3DX12_CPU_DESCRIPTOR_HANDLE samplerHandle(mInputSamplerDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+
         // Resolve the input IDs.
+        // ------------------------------------------------
+
         for (const auto& input : args.renderPassInfo["inputs"])
         {
             // Check if input is any of the unsupported ones.
@@ -76,10 +159,38 @@ namespace ICR
                     throw std::runtime_error("Unsupported input type.");
             }
 
+            if (input.contains("sampler"))
+            {
+                auto& samplerInfo = input["sampler"];
+
+                D3D12_SAMPLER_DESC samplerDesc = {};
+                {
+                    D3D12_TEXTURE_ADDRESS_MODE addressMode;
+
+                    if (samplerInfo["wrap"].get<std::string>() == "clamp")
+                        addressMode = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+                    else
+                        addressMode = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+
+                    samplerDesc.Filter        = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+                    samplerDesc.AddressU      = addressMode;
+                    samplerDesc.AddressV      = addressMode;
+                    samplerDesc.AddressW      = addressMode;
+                    samplerDesc.MinLOD        = 0;
+                    samplerDesc.MaxLOD        = D3D12_FLOAT32_MAX;
+                    samplerDesc.MaxAnisotropy = 1;
+                }
+                gLogicalDevice->CreateSampler(&samplerDesc, samplerHandle);
+
+                // Advance pointer to the next sampler descriptor.
+                samplerHandle.Offset(1, gSMPDescriptorSize);
+            }
+
             mInputIDs.push_back(input["id"].get<int>());
         }
 
         // Compile PSO.
+        // ------------------------------------------------
         {
             // 1) Compile GLSL to SPIR-V.
             // --------------------------
@@ -199,13 +310,89 @@ namespace ICR
         }
     }
 
-    void RenderInputShaderToy::RenderPass::Dispatch(ID3D12GraphicsCommandList* pCmd)
+    void RenderPass::CreateInputResourceDescriptorTable(const std::unordered_map<int, ID3D12Resource*>& resourceCache)
     {
+        // Create a descriptor heap for 4 samplers x 2 frames (history).
+        // ------------------------------------------------
+
+        D3D12_DESCRIPTOR_HEAP_DESC resourceDescriptorHeapInfo = {};
+        {
+            resourceDescriptorHeapInfo.NumDescriptors = 4 * 2;
+            resourceDescriptorHeapInfo.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+            resourceDescriptorHeapInfo.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+        }
+        ThrowIfFailed(gLogicalDevice->CreateDescriptorHeap(&resourceDescriptorHeapInfo, IID_PPV_ARGS(&mInputResourceDescriptorHeap)));
+
+        for (int frameIndex = 0; frameIndex < 2; frameIndex++)
+        {
+            // Obtain a handle to the first sampler.
+            CD3DX12_CPU_DESCRIPTOR_HANDLE resourceDescriptorHandle(mInputResourceDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
+
+            // Offset w.r.t. the frame index.
+            resourceDescriptorHandle.Offset(frameIndex * 4, gSRVDescriptorSize);
+
+            for (int inputID : mInputIDs) // NOTE: Should never exceed 4.
+            {
+                if (!resourceCache.contains(inputID))
+                    throw std::runtime_error("Input resource not found in cache.");
+
+                // Create SRV for the resource.
+                // ------------------------------------------------
+
+                D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+                {
+                    srvDesc.Format                    = DXGI_FORMAT_R8G8B8A8_UNORM;
+                    srvDesc.ViewDimension             = D3D12_SRV_DIMENSION_TEXTURE2D;
+                    srvDesc.Shader4ComponentMapping   = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                    srvDesc.Texture2D.MostDetailedMip = 0;
+                    srvDesc.Texture2D.MipLevels       = 1;
+                }
+                gLogicalDevice->CreateShaderResourceView(resourceCache.at(inputID), &srvDesc, resourceDescriptorHandle);
+
+                // Advance pointer to the next sampler descriptor.
+                resourceDescriptorHandle.Offset(1, gSRVDescriptorSize);
+            }
+        }
+    }
+
+    void RenderPass::Dispatch(ID3D12GraphicsCommandList* pCmd)
+    {
+        // Bind the output render target.
+        // ------------------------------------------------
+        CD3DX12_CPU_DESCRIPTOR_HANDLE outputRenderTarget(mOutputResourceDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
+                                                         gInternalFrameIndex % 2,
+                                                         gRTVDescriptorSize);
+
+        gCommandList->OMSetRenderTargets(1, &outputRenderTarget, FALSE, nullptr);
+
+        // Bind the input heaps.
+        // ------------------------------------------------
         ID3D12DescriptorHeap* ppHeaps[] = { mInputResourceDescriptorHeap.Get(), mInputSamplerDescriptorHeap.Get() };
         pCmd->SetDescriptorHeaps(ARRAYSIZE(ppHeaps), ppHeaps);
-        pCmd->SetGraphicsRootDescriptorTable(1, mInputResourceDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
-        pCmd->SetGraphicsRootDescriptorTable(2, mInputSamplerDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+
+        // Bind the samplers.
+        // ------------------------------------------------
+        pCmd->SetGraphicsRootDescriptorTable(1, mInputSamplerDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+
+        // Bind the current frame's resources
+        // ------------------------------------------------
+        {
+            // Obtain handle to the base of the resource descriptors.
+            CD3DX12_GPU_DESCRIPTOR_HANDLE inputResourceDescriptorHandle(mInputResourceDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+
+            // Offset w.r.t. the frame index.
+            inputResourceDescriptorHandle.Offset(gInternalFrameIndex % 2, gSRVDescriptorSize);
+
+            // Bind the input resources.
+            pCmd->SetGraphicsRootDescriptorTable(2, inputResourceDescriptorHandle);
+        }
+
+        // Bind the PSO.
+        // ------------------------------------------------
         pCmd->SetPipelineState(mPSO.Get());
+
+        // Draw the fullscreen triangle.
+        // ------------------------------------------------
         pCmd->DrawInstanced(3U, 1U, 0U, 0U);
     }
 
@@ -215,7 +402,7 @@ namespace ICR
     {
         // Initialize the shadertoy to a known-good one.
         // "Raymarching - Primitives" https://www.shadertoy.com/view/Xds3zN
-        memcpy(mShaderID.data(), "Xds3zN", 6);
+        memcpy(mShaderID.data(), "lscBW4", 6);
 
         // Initial async compile state.
         mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Idle);
@@ -231,34 +418,17 @@ namespace ICR
         //  Resources
         // ---------------------------
 
-        D3D12_RESOURCE_DESC shaderToyUBO = {};
-        {
-            shaderToyUBO.Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER;
-            shaderToyUBO.Alignment          = 0;
-            shaderToyUBO.Width              = sizeof(Constants);
-            shaderToyUBO.Height             = 1;
-            shaderToyUBO.DepthOrArraySize   = 1;
-            shaderToyUBO.MipLevels          = 1;
-            shaderToyUBO.Format             = DXGI_FORMAT_UNKNOWN;
-            shaderToyUBO.SampleDesc.Count   = 1;
-            shaderToyUBO.SampleDesc.Quality = 0;
-            shaderToyUBO.Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-            shaderToyUBO.Flags              = D3D12_RESOURCE_FLAG_NONE;
-        }
+        mUBO.resourceDesc   = CD3DX12_RESOURCE_DESC::Buffer(sizeof(Constants));
+        mUBO.allocationDesc = { D3D12MA::ALLOCATION_FLAG_NONE, D3D12_HEAP_TYPE_UPLOAD };
 
-        D3D12MA::ALLOCATION_DESC shaderToyUBOAllocDesc = {};
-        {
-            shaderToyUBOAllocDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
-        }
-
-        ThrowIfFailed(gMemoryAllocator->CreateResource(&shaderToyUBOAllocDesc,
-                                                       &shaderToyUBO,
+        ThrowIfFailed(gMemoryAllocator->CreateResource(&mUBO.allocationDesc,
+                                                       &mUBO.resourceDesc,
                                                        D3D12_RESOURCE_STATE_GENERIC_READ,
                                                        nullptr,
-                                                       mUBOAllocation.GetAddressOf(),
-                                                       IID_PPV_ARGS(mUBO.GetAddressOf())));
+                                                       &mUBO.allocation,
+                                                       IID_PPV_ARGS(&mUBO.resource)));
 
-        ThrowIfFailed(mUBO->Map(0, nullptr, &mpUBOData));
+        ThrowIfFailed(mUBO.resource->Map(0, nullptr, &mpUBOData));
 
         // Descriptor heaps.
         // ---------------------------
@@ -276,7 +446,7 @@ namespace ICR
 
         D3D12_CONSTANT_BUFFER_VIEW_DESC constantBufferViewDesc = {};
         {
-            constantBufferViewDesc.BufferLocation = mUBO->GetGPUVirtualAddress();
+            constantBufferViewDesc.BufferLocation = mUBO.resource->GetGPUVirtualAddress();
             constantBufferViewDesc.SizeInBytes    = sizeof(Constants);
         }
         gLogicalDevice->CreateConstantBufferView(&constantBufferViewDesc, mUBOHeap->GetCPUDescriptorHandleForHeapStart());
@@ -285,15 +455,7 @@ namespace ICR
         // ---------------------------
 
         {
-            D3D12_DESCRIPTOR_RANGE inputSRVRanges = {};
-            {
-                inputSRVRanges.RangeType          = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-                inputSRVRanges.NumDescriptors     = 4;
-                inputSRVRanges.BaseShaderRegister = 0;
-                inputSRVRanges.RegisterSpace      = 1;
-            }
-
-            D3D12_DESCRIPTOR_RANGE inputSMPRanges = {};
+            D3D12_DESCRIPTOR_RANGE1 inputSMPRanges = {};
             {
                 inputSMPRanges.RangeType          = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
                 inputSMPRanges.NumDescriptors     = 4;
@@ -301,42 +463,29 @@ namespace ICR
                 inputSMPRanges.RegisterSpace      = 1;
             }
 
-            std::vector<D3D12_ROOT_PARAMETER> rootParameters;
+            D3D12_DESCRIPTOR_RANGE1 inputSRVRanges = {};
             {
+                inputSRVRanges.RangeType          = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+                inputSRVRanges.NumDescriptors     = 4;
+                inputSRVRanges.BaseShaderRegister = 0;
+                inputSRVRanges.RegisterSpace      = 1;
+            }
 
-                D3D12_ROOT_PARAMETER uniformsParameter = {};
-                {
-                    uniformsParameter.ParameterType             = D3D12_ROOT_PARAMETER_TYPE_CBV;
-                    uniformsParameter.Descriptor.RegisterSpace  = 0;
-                    uniformsParameter.Descriptor.ShaderRegister = 0;
-                    uniformsParameter.ShaderVisibility          = D3D12_SHADER_VISIBILITY_PIXEL;
-                }
-                rootParameters.push_back(uniformsParameter);
+            std::array<CD3DX12_ROOT_PARAMETER1, 3> rootParameters;
+            {
+                // Constants (includes the ShaderToy inputs).
+                rootParameters[0].InitAsConstantBufferView(0, 0, D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC, D3D12_SHADER_VISIBILITY_PIXEL);
 
-                D3D12_ROOT_PARAMETER shaderResourceDescriptorTable = {};
-                {
-                    shaderResourceDescriptorTable.ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-                    shaderResourceDescriptorTable.DescriptorTable.NumDescriptorRanges = 1;
-                    shaderResourceDescriptorTable.DescriptorTable.pDescriptorRanges   = &inputSRVRanges;
-                    shaderResourceDescriptorTable.ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
-                }
-                rootParameters.push_back(shaderResourceDescriptorTable);
-
-                D3D12_ROOT_PARAMETER samplerDescriptorTable = {};
-                {
-                    samplerDescriptorTable.ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-                    samplerDescriptorTable.DescriptorTable.NumDescriptorRanges = 1;
-                    samplerDescriptorTable.DescriptorTable.pDescriptorRanges   = &inputSMPRanges;
-                    samplerDescriptorTable.ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
-                }
-                rootParameters.push_back(samplerDescriptorTable);
+                // These can't be static samplers since it can vary per-pass.
+                rootParameters[1].InitAsDescriptorTable(1, &inputSMPRanges, D3D12_SHADER_VISIBILITY_PIXEL);
+                rootParameters[2].InitAsDescriptorTable(1, &inputSRVRanges, D3D12_SHADER_VISIBILITY_PIXEL);
             }
 
             D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc = {};
 
             rootSignatureDesc.Version                = D3D_ROOT_SIGNATURE_VERSION_1_0;
             rootSignatureDesc.Desc_1_0.NumParameters = static_cast<UINT>(rootParameters.size());
-            rootSignatureDesc.Desc_1_0.pParameters   = rootParameters.data();
+            rootSignatureDesc.Desc_1_0.pParameters   = reinterpret_cast<const D3D12_ROOT_PARAMETER*>(rootParameters.data());
 
             ComPtr<ID3DBlob> pBlobSignature;
             ComPtr<ID3DBlob> pBlobError;
@@ -385,14 +534,11 @@ namespace ICR
         // Intermediate memory for tracking renderpass dependencies.
         std::unordered_map<int, tf::Task> renderPassTaskMap;
 
-        // Reset the render graph.
         mRenderGraph.clear();
-
-        // Clear the render passes.
         mRenderPasses.clear();
-
-        // CLear the common shader.
         mCommonShaderGLSL.clear();
+        mResourceCache.clear();
+        mMediaResources.clear();
 
         // Scan 1) Pre-pass for the common shader.
         for (const auto& renderPassInfo : parsedShaderToy["Shader"]["renderpass"])
@@ -429,32 +575,18 @@ namespace ICR
             // Get the recently added render pass.
             auto* renderPass = mRenderPasses.back().get();
 
+            // Insert the render pass output into the input provider.
+            mResourceCache[renderPass->GetOutputID()] = renderPass->GetOutputResource();
+
             // Insert the render pass into the render graph.
             renderPassTaskMap[renderPass->GetOutputID()] = mRenderGraph.emplace([this, renderPass]() { renderPass->Dispatch(mpActiveCommandList); });
         }
 
-        // Scan 3) Resolve all render pass dependencies.
-        for (const auto& renderPass : mRenderPasses)
-        {
-            for (const auto& inputID : renderPass->GetInputIDs())
-            {
-                // Skip inputs that are not provided from other render passes.
-                if (!renderPassTaskMap.contains(inputID))
-                    continue;
-
-                // Skip self-referential inputs.
-                if (inputID == renderPass->GetOutputID())
-                    continue;
-
-                renderPassTaskMap[inputID].precede(renderPassTaskMap[renderPass->GetOutputID()]);
-            }
-        }
-
-#if 0
-        // Pass 1) Parse all non-buffer inputs.
+#if 1
+        // Parse all non-buffer inputs.
         // ---------------------------------
 
-        std::unordered_set<std::string> inputTextureURLs;
+        std::unordered_map<int, std::string> inputTextureURLs;
 
         for (const auto& renderPass : parsedShaderToy["Shader"]["renderpass"])
         {
@@ -469,12 +601,12 @@ namespace ICR
                     return false;
                 }
 
-                if (inputType == "texture")
-                    inputTextureURLs.insert(input["src"].get<std::string>());
+                if (inputType == "texture" || inputType == "cubemap")
+                    inputTextureURLs[input["id"]] = input["src"].get<std::string>();
             }
         }
 
-        // Pass 1) Obtain any media from server.
+        // Obtain any media from server.
         // ---------------------------------
 
         for (const auto& inputTextureURL : inputTextureURLs)
@@ -484,7 +616,7 @@ namespace ICR
             // Pull image bytes from the API.
             // ------------------------------
 
-            auto data = QueryURL<std::vector<uint8_t>>("https://www.shadertoy.com" + inputTextureURL);
+            auto data = QueryURL<std::vector<uint8_t>>("https://www.shadertoy.com" + inputTextureURL.second);
 
             if (data.empty())
             {
@@ -550,9 +682,33 @@ namespace ICR
                     UpdateSubresources(pCmd, dedicatedMemory.resource.Get(), scratchMemory.resource.Get(), 0, 0, 1, &subresourceData);
                 });
 
-            spdlog::info("Upload complete!");
+            // Transfer the resource to the media resource cache.
+            mMediaResources.push_back(std::move(dedicatedMemory));
+
+            // And specify it here.
+            mResourceCache[inputTextureURL.first] = mMediaResources.back().resource.Get();
         }
 #endif
+
+        // Scan 3) Resolve all render pass dependencies.
+        for (const auto& renderPass : mRenderPasses)
+        {
+            // Now that all input resources are allocated, each render pass can build their srv heap.
+            renderPass->CreateInputResourceDescriptorTable(mResourceCache);
+
+            for (const auto& inputID : renderPass->GetInputIDs())
+            {
+                // Skip inputs that are not provided from other render passes.
+                if (!renderPassTaskMap.contains(inputID))
+                    continue;
+
+                // Skip self-referential inputs.
+                if (inputID == renderPass->GetOutputID())
+                    continue;
+
+                renderPassTaskMap[inputID].precede(renderPassTaskMap[renderPass->GetOutputID()]);
+            }
+        }
 
         return true;
     }
@@ -589,6 +745,8 @@ namespace ICR
         // TEMP
         return true;
     }
+
+    void RenderInputShaderToy::ResizeViewportTargets(const DirectX::XMINT2& dim) {}
 
     void RenderInputShaderToy::RenderInterface()
     {
@@ -723,7 +881,7 @@ namespace ICR
         // Root signature is the same for all render passes, so set it once.
         frameParams.pCmd->SetGraphicsRootSignature(mRootSignature.Get());
         frameParams.pCmd->SetDescriptorHeaps(1U, mUBOHeap.GetAddressOf());
-        frameParams.pCmd->SetGraphicsRootConstantBufferView(0u, mUBO->GetGPUVirtualAddress());
+        frameParams.pCmd->SetGraphicsRootConstantBufferView(0u, mUBO.resource->GetGPUVirtualAddress());
         frameParams.pCmd->RSSetScissorRects(1U, &scissor);
         frameParams.pCmd->RSSetViewports(1U, &gViewport);
         frameParams.pCmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -735,6 +893,9 @@ namespace ICR
 
         // Dispatch all of the render passes in order.
         renderGraphExecutor.run(mRenderGraph).wait();
+
+        // Increment the internal frame index.
+        gInternalFrameIndex++;
     }
 
     void RenderInputShaderToy::Release()
@@ -747,9 +908,9 @@ namespace ICR
         mRenderPasses.clear();
         mCommonShaderGLSL.clear();
 
-        mUBO->Unmap(0, nullptr);
-        mUBOAllocation.Reset();
-        mUBO.Reset();
+        mUBO.resource->Unmap(0, nullptr);
+        mUBO.allocation.Reset();
+        mUBO.resource.Reset();
         mUBOHeap.Reset();
         mRootSignature.Reset();
         mPSO.Reset();
