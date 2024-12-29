@@ -7,6 +7,10 @@ namespace ICR
     // For managing of history buffers, we keep an internal counter here and use it to flip current + history buffers.
     uint32_t gInternalFrameIndex = 0;
 
+    // Shorthand for getting current + history resources.
+    int GetCurrentFrameIndex() { return gInternalFrameIndex % 2; }
+    int GetHistoryFrameIndex() { return (gInternalFrameIndex + 1) % 2; }
+
     constexpr const char* kFragmentShaderShaderToyInputs = R"(
 
         layout (set = 0, binding = 0) uniform UBO
@@ -47,7 +51,7 @@ namespace ICR
         {
             vec2 fragCoordViewport = gl_FragCoord.xy;
 
-            fragCoordViewport.x -= iAppViewport.x;
+            // fragCoordViewport.x -= iAppViewport.x;
             fragCoordViewport.y  = iResolution.y - fragCoordViewport.y;
 
             // Invoke the ShaderToy shader.
@@ -309,7 +313,7 @@ namespace ICR
         }
     }
 
-    void RenderPass::CreateInputResourceDescriptorTable(const std::unordered_map<int, ID3D12Resource*>& resourceCache)
+    void RenderPass::CreateInputResourceDescriptorTable(const std::unordered_map<int, std::array<ID3D12Resource*, 2>>& resourceCache)
     {
         // Create a descriptor heap for 4 samplers x 2 frames (history).
         // ------------------------------------------------
@@ -345,7 +349,7 @@ namespace ICR
                     srvDesc.Texture2D.MostDetailedMip = 0;
                     srvDesc.Texture2D.MipLevels       = 1;
                 }
-                gLogicalDevice->CreateShaderResourceView(resourceCache.at(inputID), &srvDesc, resourceDescriptorHandle);
+                gLogicalDevice->CreateShaderResourceView(resourceCache.at(inputID)[frameIndex], &srvDesc, resourceDescriptorHandle);
             }
         }
     }
@@ -354,19 +358,19 @@ namespace ICR
 
     void RenderPass::Dispatch(ID3D12GraphicsCommandList* pCmd)
     {
-        std::lock_guard<std::mutex> lock(gRenderPassCommandMutex);
+        std::lock_guard<std::mutex> commandLock(gRenderPassCommandMutex);
 
         // Bind the output render target.
         // ------------------------------------------------
         CD3DX12_CPU_DESCRIPTOR_HANDLE outputRenderTarget(mOutputResourceDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
-                                                         gInternalFrameIndex % 2,
+                                                         GetCurrentFrameIndex(),
                                                          gRTVDescriptorSize);
 
         gCommandList->OMSetRenderTargets(1, &outputRenderTarget, FALSE, nullptr);
 
         // Bind the input heaps.
         // ------------------------------------------------
-        ID3D12DescriptorHeap* ppHeaps[] = { mInputResourceDescriptorHeap.Get(), mInputSamplerDescriptorHeap.Get() };
+        ID3D12DescriptorHeap* ppHeaps[2] = { mInputResourceDescriptorHeap.Get(), mInputSamplerDescriptorHeap.Get() };
         pCmd->SetDescriptorHeaps(ARRAYSIZE(ppHeaps), ppHeaps);
 
         // Bind the samplers.
@@ -380,7 +384,7 @@ namespace ICR
             CD3DX12_GPU_DESCRIPTOR_HANDLE inputResourceDescriptorHandle(mInputResourceDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
 
             // Offset w.r.t. the frame index.
-            inputResourceDescriptorHandle.Offset(gInternalFrameIndex % 2, gSRVDescriptorSize);
+            inputResourceDescriptorHandle.Offset(4 * GetHistoryFrameIndex(), gSRVDescriptorSize);
 
             // Bind the input resources.
             pCmd->SetGraphicsRootDescriptorTable(2, inputResourceDescriptorHandle);
@@ -574,8 +578,13 @@ namespace ICR
             // Get the recently added render pass.
             auto* renderPass = mRenderPasses.back().get();
 
+            // Keep track of the final render pass.
+            if (renderPassInfo["name"] == "Image")
+                mpFinalRenderPass = renderPass;
+
             // Insert the render pass output into the input provider.
-            mResourceCache[renderPass->GetOutputID()] = renderPass->GetOutputResource();
+            mResourceCache[renderPass->GetOutputID()][0] = renderPass->GetOutputResources()[0].resource.Get();
+            mResourceCache[renderPass->GetOutputID()][1] = renderPass->GetOutputResources()[1].resource.Get();
 
             // Insert the render pass into the render graph.
             renderPassTaskMap[renderPass->GetOutputID()] = mRenderGraph.emplace([this, renderPass]() { renderPass->Dispatch(mpActiveCommandList); });
@@ -689,7 +698,8 @@ namespace ICR
             mMediaResources.push_back(std::move(dedicatedMemory));
 
             // And specify it here.
-            mResourceCache[mediaInputId] = mMediaResources.back().resource.Get();
+            mResourceCache[mediaInputId][0] = mMediaResources.back().resource.Get();
+            mResourceCache[mediaInputId][1] = mResourceCache[mediaInputId][0]; // No history for media.
         }
 #endif
 
@@ -745,7 +755,6 @@ namespace ICR
         if (!BuildRenderGraph(parsedData))
             return false;
 
-        // TEMP
         return true;
     }
 
@@ -879,12 +888,18 @@ namespace ICR
         elapsedSeconds += gDeltaTime;
         elapsedFrames++;
 
+        D3D12_VIEWPORT viewport = gViewport;
+        {
+            viewport.TopLeftX = 0.0f;
+            viewport.TopLeftY = 0.0f;
+        }
+        frameParams.pCmd->RSSetViewports(1U, &viewport);
+
         // Root signature is the same for all render passes, so set it once.
         frameParams.pCmd->SetGraphicsRootSignature(mRootSignature.Get());
         frameParams.pCmd->SetDescriptorHeaps(1U, mUBOHeap.GetAddressOf());
         frameParams.pCmd->SetGraphicsRootConstantBufferView(0u, mUBO.resource->GetGPUVirtualAddress());
         frameParams.pCmd->RSSetScissorRects(1U, &scissor);
-        frameParams.pCmd->RSSetViewports(1U, &gViewport);
         frameParams.pCmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
         // Configure the active command lists.

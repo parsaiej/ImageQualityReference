@@ -5,7 +5,8 @@ namespace ICR
 {
     struct FrameParams
     {
-        ID3D12GraphicsCommandList* pCmd;
+        ID3D12GraphicsCommandList*  pCmd;
+        D3D12_CPU_DESCRIPTOR_HANDLE currentSwapChainBufferRTV;
     };
 
     enum RenderInputMode

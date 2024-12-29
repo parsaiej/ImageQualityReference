@@ -28,21 +28,20 @@ namespace ICR
 
             RenderPass(const Args& args);
 
-            void CreateInputResourceDescriptorTable(const std::unordered_map<int, ID3D12Resource*>& resourceCache);
+            void CreateInputResourceDescriptorTable(const std::unordered_map<int, std::array<ID3D12Resource*, 2>>& resourceCache);
 
             void Dispatch(ID3D12GraphicsCommandList* pCmd);
 
-            inline const int&                   GetOutputID() const { return mOutputID; }
-            inline const std::vector<int>&      GetInputIDs() const { return mInputIDs; }
-            inline const std::vector<uint32_t>& GetSPIRV() const { return mSPIRV; }
-            inline ID3D12Resource*              GetOutputResource() const { return mOutputResource.Get(); }
+            inline const int&                          GetOutputID() const { return mOutputID; }
+            inline const std::vector<int>&             GetInputIDs() const { return mInputIDs; }
+            inline const std::vector<uint32_t>&        GetSPIRV() const { return mSPIRV; }
+            inline const std::array<DeviceResource, 2> GetOutputResources() const { return mOutputTargets; }
 
         private:
 
             int                           mOutputID;
             std::vector<int>              mInputIDs;
             ComPtr<ID3D12PipelineState>   mPSO;
-            ComPtr<ID3D12Resource>        mOutputResource;
             ComPtr<ID3D12DescriptorHeap>  mInputSamplerDescriptorHeap;
             ComPtr<ID3D12DescriptorHeap>  mInputResourceDescriptorHeap;
             ComPtr<ID3D12DescriptorHeap>  mOutputResourceDescriptorHeap;
@@ -100,19 +99,20 @@ namespace ICR
         ComPtr<ID3D12DescriptorHeap> mUBOHeap;
         void*                        mpUBOData;
 
-        tf::Taskflow                             mRenderGraph;
-        std::string                              mCommonShaderGLSL;
-        ID3D12GraphicsCommandList*               mpActiveCommandList;
-        std::vector<std::unique_ptr<RenderPass>> mRenderPasses;
-        std::string                              mShaderID;
-        MediaCache                               mMediaCache;
-        bool                                     mInitialized;
-        ComPtr<ID3D12PipelineState>              mPSO;
-        ComPtr<ID3D12RootSignature>              mRootSignature;
-        std::atomic<AsyncCompileShaderToyStatus> mAsyncCompileStatus;
-        bool                                     mUserRequestUnload;
-        std::unordered_map<int, ID3D12Resource*> mResourceCache;
-        std::vector<DeviceResource>              mMediaResources;
+        tf::Taskflow                                            mRenderGraph;
+        std::string                                             mCommonShaderGLSL;
+        ID3D12GraphicsCommandList*                              mpActiveCommandList;
+        std::vector<std::unique_ptr<RenderPass>>                mRenderPasses;
+        RenderPass*                                             mpFinalRenderPass;
+        std::string                                             mShaderID;
+        MediaCache                                              mMediaCache;
+        bool                                                    mInitialized;
+        ComPtr<ID3D12PipelineState>                             mPSO;
+        ComPtr<ID3D12RootSignature>                             mRootSignature;
+        std::atomic<AsyncCompileShaderToyStatus>                mAsyncCompileStatus;
+        bool                                                    mUserRequestUnload;
+        std::unordered_map<int, std::array<ID3D12Resource*, 2>> mResourceCache;
+        std::vector<DeviceResource>                             mMediaResources;
     };
 } // namespace ICR
 

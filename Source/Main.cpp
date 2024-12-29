@@ -889,7 +889,7 @@ void Render()
     }
 
     if (gRenderInput)
-        gRenderInput->Render({ gCommandList.Get() });
+        gRenderInput->Render({ gCommandList.Get(), currentSwapChainBufferRTV });
 
     Interface::Draw();
 
