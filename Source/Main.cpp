@@ -891,6 +891,9 @@ void Render()
     if (gRenderInput)
         gRenderInput->Render({ gCommandList.Get(), currentSwapChainBufferRTV });
 
+    // Reset the backbuffer as render target.
+    gCommandList->OMSetRenderTargets(1, &currentSwapChainBufferRTV, FALSE, nullptr);
+
     Interface::Draw();
 
     gCommandList->SetDescriptorHeaps(1, gImguiDescriptorHeapSRV.GetAddressOf());
