@@ -73,6 +73,13 @@ namespace ICR
         // WARNING: Currently ShaderToy does not support MRT, so we assume there will only ever be one output per-pass.
         mOutputID = args.renderPassInfo["outputs"][0]["id"].get<int>();
 
+        DXGI_FORMAT outputFormat;
+
+        if (args.renderPassInfo["type"] == "buffer")
+            outputFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        else
+            outputFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+
         // Create output resources.
         // ------------------------------------------------
         {
@@ -92,7 +99,7 @@ namespace ICR
 
             auto CreateOutputColorBuffer = [&](DeviceResource& viewportSizedColorBuffer)
             {
-                viewportSizedColorBuffer.resourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM,
+                viewportSizedColorBuffer.resourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(outputFormat,
                                                                                      static_cast<UINT>(gViewport.Width),
                                                                                      static_cast<UINT>(gViewport.Height),
                                                                                      1,
@@ -104,7 +111,7 @@ namespace ICR
                 viewportSizedColorBuffer.allocationDesc = { D3D12MA::ALLOCATION_FLAG_NONE, D3D12_HEAP_TYPE_DEFAULT };
 
                 D3D12_CLEAR_VALUE clearValue = {};
-                clearValue.Format            = DXGI_FORMAT_R8G8B8A8_UNORM;
+                clearValue.Format            = outputFormat;
                 memcpy(clearValue.Color, clearColor, sizeof(clearColor));
 
                 ThrowIfFailed(gMemoryAllocator->CreateResource(&viewportSizedColorBuffer.allocationDesc,
@@ -302,7 +309,7 @@ namespace ICR
                 shaderToyPSOInfo.PrimitiveTopologyType             = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
                 shaderToyPSOInfo.SampleMask                        = UINT_MAX;
                 shaderToyPSOInfo.NumRenderTargets                  = 1;
-                shaderToyPSOInfo.RTVFormats[0]                     = DXGI_FORMAT_R8G8B8A8_UNORM;
+                shaderToyPSOInfo.RTVFormats[0]                     = outputFormat;
                 shaderToyPSOInfo.SampleDesc.Count                  = 1;
                 shaderToyPSOInfo.pRootSignature                    = args.pRootSignature;
             }
@@ -315,7 +322,7 @@ namespace ICR
 
     void RenderPass::CreateInputResourceDescriptorTable(const std::unordered_map<int, std::array<ID3D12Resource*, 2>>& resourceCache)
     {
-        // Create a descriptor heap for 4 samplers x 2 frames (history).
+        // Create a descriptor heap for 4 resources x 2 frames (history).
         // ------------------------------------------------
 
         D3D12_DESCRIPTOR_HEAP_DESC resourceDescriptorHeapInfo = {};
@@ -341,15 +348,20 @@ namespace ICR
                 // Create SRV for the resource.
                 // ------------------------------------------------
 
+                auto* pResource = resourceCache.at(inputID)[frameIndex];
+
+                // Recover the image's format.
+                auto resourceInfo = pResource->GetDesc();
+
                 D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
                 {
-                    srvDesc.Format                    = DXGI_FORMAT_R8G8B8A8_UNORM;
+                    srvDesc.Format                    = resourceInfo.Format;
                     srvDesc.ViewDimension             = D3D12_SRV_DIMENSION_TEXTURE2D;
                     srvDesc.Shader4ComponentMapping   = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
                     srvDesc.Texture2D.MostDetailedMip = 0;
                     srvDesc.Texture2D.MipLevels       = 1;
                 }
-                gLogicalDevice->CreateShaderResourceView(resourceCache.at(inputID)[frameIndex], &srvDesc, resourceDescriptorHandle);
+                gLogicalDevice->CreateShaderResourceView(pResource, &srvDesc, resourceDescriptorHandle);
             }
         }
     }
@@ -358,6 +370,7 @@ namespace ICR
 
     void RenderPass::Dispatch(ID3D12GraphicsCommandList* pCmd)
     {
+        // Need to lock here because taskflow may dispatch two tasks at the same time that do not depend on each other.
         std::lock_guard<std::mutex> commandLock(gRenderPassCommandMutex);
 
         // Bind the output render target.
@@ -405,7 +418,7 @@ namespace ICR
     {
         // Initialize the shadertoy to a known-good one.
         // "Raymarching - Primitives" https://www.shadertoy.com/view/Xds3zN
-        memcpy(mShaderID.data(), "lscBW4", 6);
+        memcpy(mShaderID.data(), "4tByz3", 6);
 
         // Initial async compile state.
         mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Idle);
@@ -862,14 +875,6 @@ namespace ICR
             default                                    : break;
         };
 
-        D3D12_RECT scissor = {};
-        {
-            scissor.left   = static_cast<LONG>(0);
-            scissor.top    = static_cast<LONG>(0);
-            scissor.right  = static_cast<LONG>(gBackBufferSize.x);
-            scissor.bottom = static_cast<LONG>(gBackBufferSize.y);
-        }
-
         static float elapsedSeconds = 0;
         static int   elapsedFrames  = 0;
 
@@ -888,18 +893,26 @@ namespace ICR
         elapsedSeconds += gDeltaTime;
         elapsedFrames++;
 
+        D3D12_RECT scissor = {};
+        {
+            scissor.left   = static_cast<LONG>(0);
+            scissor.top    = static_cast<LONG>(0);
+            scissor.right  = static_cast<LONG>(gBackBufferSize.x);
+            scissor.bottom = static_cast<LONG>(gBackBufferSize.y);
+        }
+
         D3D12_VIEWPORT viewport = gViewport;
         {
             viewport.TopLeftX = 0.0f;
             viewport.TopLeftY = 0.0f;
         }
         frameParams.pCmd->RSSetViewports(1U, &viewport);
+        frameParams.pCmd->RSSetScissorRects(1U, &scissor);
 
         // Root signature is the same for all render passes, so set it once.
         frameParams.pCmd->SetGraphicsRootSignature(mRootSignature.Get());
         frameParams.pCmd->SetDescriptorHeaps(1U, mUBOHeap.GetAddressOf());
         frameParams.pCmd->SetGraphicsRootConstantBufferView(0u, mUBO.resource->GetGPUVirtualAddress());
-        frameParams.pCmd->RSSetScissorRects(1U, &scissor);
         frameParams.pCmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
         // Configure the active command lists.
@@ -909,6 +922,37 @@ namespace ICR
 
         // Dispatch all of the render passes in order.
         renderGraphExecutor.run(mRenderGraph).wait();
+
+        // Blit final output into swapchain backbuffer.
+        {
+            D3D12_RESOURCE_BARRIER transitionBarriers[2];
+
+            transitionBarriers[0] =
+                CD3DX12_RESOURCE_BARRIER::Transition(mpFinalRenderPass->GetOutputResources()[GetCurrentFrameIndex()].resource.Get(),
+                                                     D3D12_RESOURCE_STATE_RENDER_TARGET,
+                                                     D3D12_RESOURCE_STATE_COPY_SOURCE);
+
+            transitionBarriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(gSwapChainImages[gCurrentSwapChainImageIndex].Get(),
+                                                                         D3D12_RESOURCE_STATE_RENDER_TARGET,
+                                                                         D3D12_RESOURCE_STATE_COPY_DEST);
+
+            gCommandList->ResourceBarrier(2, transitionBarriers);
+
+            CD3DX12_TEXTURE_COPY_LOCATION src(mpFinalRenderPass->GetOutputResources()[GetCurrentFrameIndex()].resource.Get());
+            CD3DX12_TEXTURE_COPY_LOCATION dst(gSwapChainImages[gCurrentSwapChainImageIndex].Get());
+            frameParams.pCmd->CopyTextureRegion(&dst, static_cast<UINT>(gViewport.TopLeftX), 0, 0, &src, nullptr);
+
+            transitionBarriers[0] =
+                CD3DX12_RESOURCE_BARRIER::Transition(mpFinalRenderPass->GetOutputResources()[GetCurrentFrameIndex()].resource.Get(),
+                                                     D3D12_RESOURCE_STATE_COPY_SOURCE,
+                                                     D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+            transitionBarriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(gSwapChainImages[gCurrentSwapChainImageIndex].Get(),
+                                                                         D3D12_RESOURCE_STATE_COPY_DEST,
+                                                                         D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+            gCommandList->ResourceBarrier(2, transitionBarriers);
+        }
 
         // Increment the internal frame index.
         gInternalFrameIndex++;
