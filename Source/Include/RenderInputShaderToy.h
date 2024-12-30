@@ -11,10 +11,6 @@ namespace ICR
     {
     public:
 
-        class MediaCache
-        {
-        };
-
         class RenderPass
         {
         public:
@@ -106,7 +102,6 @@ namespace ICR
         std::vector<std::unique_ptr<RenderPass>>                mRenderPasses;
         RenderPass*                                             mpFinalRenderPass;
         std::string                                             mShaderID;
-        MediaCache                                              mMediaCache;
         bool                                                    mInitialized;
         ComPtr<ID3D12PipelineState>                             mPSO;
         ComPtr<ID3D12RootSignature>                             mRootSignature;

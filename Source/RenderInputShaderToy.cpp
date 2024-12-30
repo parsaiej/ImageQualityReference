@@ -52,18 +52,8 @@ namespace ICR
 
         void main()
         {
-            vec2 fragCoord = gl_FragCoord.xy;
-
-            if (iAppParams0.x > 0)
-            {
-                fragCoord.y = iResolution.y - fragCoord.y;
-
-                fragColorOut = vec4(1, 0, 0, 1);
-                return;
-            }
-
             // Invoke the ShaderToy shader.
-            mainImage(fragColorOut, fragCoord);
+            mainImage(fragColorOut, gl_FragCoord.xy);
         }
 
     )";
@@ -627,7 +617,6 @@ namespace ICR
                 mRenderGraph.emplace([this, renderPass]() { renderPass->Dispatch(mpActiveCommandList, &mpUBOData); });
         }
 
-#if 1
         // Parse all non-buffer inputs.
         // ---------------------------------
 
@@ -676,7 +665,7 @@ namespace ICR
             // Load the image
             // ------------------------------
 
-            stbi_set_flip_vertically_on_load(true);
+            // stbi_set_flip_vertically_on_load(true);
 
             int  width, height, channels;
             auto pImage = stbi_load_from_memory(data.data(), static_cast<int>(data.size()), &width, &height, &channels, STBI_rgb_alpha);
@@ -740,7 +729,6 @@ namespace ICR
             mResourceCache[mediaInputId][0] = mMediaResources.back().resource.Get();
             mResourceCache[mediaInputId][1] = mResourceCache[mediaInputId][0]; // No history for media.
         }
-#endif
 
         // Scan 3) Resolve all render pass dependencies.
         for (const auto& renderPass : mRenderPasses)
@@ -984,6 +972,12 @@ namespace ICR
     {
         if (!mInitialized)
             return;
+
+        for (auto& mediaResources : mMediaResources)
+        {
+            mediaResources.resource.Reset();
+            mediaResources.allocation.Reset();
+        }
 
         mShaderAPIRequestResult.clear();
         mRenderGraph.clear();
