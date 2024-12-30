@@ -30,7 +30,7 @@ namespace ICR
 
             void CreateInputResourceDescriptorTable(const std::unordered_map<int, std::array<ID3D12Resource*, 2>>& resourceCache);
 
-            void Dispatch(ID3D12GraphicsCommandList* pCmd);
+            void Dispatch(ID3D12GraphicsCommandList* pCmd, void** pConstantData);
 
             inline const int&                          GetOutputID() const { return mOutputID; }
             inline const std::vector<int>&             GetInputIDs() const { return mInputIDs; }
@@ -48,6 +48,7 @@ namespace ICR
             std::vector<uint32_t>         mSPIRV;
             std::array<DeviceResource, 2> mOutputTargets;
             std::unordered_map<int, int>  mInputToChannelMap;
+            bool                          mIntermediateRenderPass;
         };
 
         enum AsyncCompileShaderToyStatus
@@ -60,7 +61,7 @@ namespace ICR
 
         struct Constants
         {
-            DirectX::XMFLOAT4 iAppViewport;
+            DirectX::XMFLOAT4 iAppParams0;
 
             DirectX::XMFLOAT3 iResolution;
             float             iTime;

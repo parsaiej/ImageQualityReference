@@ -7,6 +7,9 @@ namespace ICR
     // For managing of history buffers, we keep an internal counter here and use it to flip current + history buffers.
     uint32_t gInternalFrameIndex = 0;
 
+    static float elapsedSeconds = 0;
+    static int   elapsedFrames  = 0;
+
     // Shorthand for getting current + history resources.
     int GetCurrentFrameIndex() { return gInternalFrameIndex % 2; }
     int GetHistoryFrameIndex() { return (gInternalFrameIndex + 1) % 2; }
@@ -16,7 +19,7 @@ namespace ICR
         layout (set = 0, binding = 0) uniform UBO
         {
             // Add some application-specific inputs.
-            vec4 iAppViewport;
+            vec4 iAppParams0;
 
             // Constant buffer adapted from ShaderToy inputs.
             vec3      iResolution;           // viewport resolution (in pixels)
@@ -49,13 +52,18 @@ namespace ICR
 
         void main()
         {
-            vec2 fragCoordViewport = gl_FragCoord.xy;
+            vec2 fragCoord = gl_FragCoord.xy;
 
-            // fragCoordViewport.x -= iAppViewport.x;
-            fragCoordViewport.y  = iResolution.y - fragCoordViewport.y;
+            if (iAppParams0.x > 0)
+            {
+                fragCoord.y = iResolution.y - fragCoord.y;
+
+                fragColorOut = vec4(1, 0, 0, 1);
+                return;
+            }
 
             // Invoke the ShaderToy shader.
-            mainImage(fragColorOut, fragCoordViewport);
+            mainImage(fragColorOut, fragCoord);
         }
 
     )";
@@ -73,9 +81,12 @@ namespace ICR
         // WARNING: Currently ShaderToy does not support MRT, so we assume there will only ever be one output per-pass.
         mOutputID = args.renderPassInfo["outputs"][0]["id"].get<int>();
 
+        // Intermediate renderpasses need full float format and flipped viewport.
+        mIntermediateRenderPass = args.renderPassInfo["type"] == "buffer";
+
         DXGI_FORMAT outputFormat;
 
-        if (args.renderPassInfo["type"] == "buffer")
+        if (mIntermediateRenderPass)
             outputFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
         else
             outputFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
@@ -368,10 +379,22 @@ namespace ICR
 
     static std::mutex gRenderPassCommandMutex;
 
-    void RenderPass::Dispatch(ID3D12GraphicsCommandList* pCmd)
+    void RenderPass::Dispatch(ID3D12GraphicsCommandList* pCmd, void** pConstantData)
     {
         // Need to lock here because taskflow may dispatch two tasks at the same time that do not depend on each other.
         std::lock_guard<std::mutex> commandLock(gRenderPassCommandMutex);
+
+        Constants constants = {};
+        {
+            constants.iResolution.x = gViewport.Width;
+            constants.iResolution.y = gViewport.Height;
+            constants.iTime         = elapsedSeconds;
+            constants.iFrame        = elapsedFrames;
+            constants.iTimeDelta    = gDeltaTime;
+            constants.iFrameRate    = 1.0f / gDeltaTime;
+            constants.iAppParams0.x = mIntermediateRenderPass ? 1.0f : -1.0f;
+        }
+        memcpy(*pConstantData, &constants, sizeof(Constants));
 
         // Bind the output render target.
         // ------------------------------------------------
@@ -600,7 +623,8 @@ namespace ICR
             mResourceCache[renderPass->GetOutputID()][1] = renderPass->GetOutputResources()[1].resource.Get();
 
             // Insert the render pass into the render graph.
-            renderPassTaskMap[renderPass->GetOutputID()] = mRenderGraph.emplace([this, renderPass]() { renderPass->Dispatch(mpActiveCommandList); });
+            renderPassTaskMap[renderPass->GetOutputID()] =
+                mRenderGraph.emplace([this, renderPass]() { renderPass->Dispatch(mpActiveCommandList, &mpUBOData); });
         }
 
 #if 1
@@ -651,6 +675,8 @@ namespace ICR
 
             // Load the image
             // ------------------------------
+
+            stbi_set_flip_vertically_on_load(true);
 
             int  width, height, channels;
             auto pImage = stbi_load_from_memory(data.data(), static_cast<int>(data.size()), &width, &height, &channels, STBI_rgb_alpha);
@@ -875,23 +901,16 @@ namespace ICR
             default                                    : break;
         };
 
-        static float elapsedSeconds = 0;
-        static int   elapsedFrames  = 0;
-
-        Constants constants = {};
-        {
-            constants.iResolution.x = gViewport.Width;
-            constants.iResolution.y = gViewport.Height;
-            constants.iTime         = elapsedSeconds;
-            constants.iFrame        = elapsedFrames;
-            constants.iTimeDelta    = gDeltaTime;
-            constants.iFrameRate    = 1.0f / gDeltaTime;
-            constants.iAppViewport  = { gViewport.TopLeftX, gViewport.TopLeftY, gViewport.Width, gViewport.Height };
-        }
-        memcpy(mpUBOData, &constants, sizeof(Constants));
-
-        elapsedSeconds += gDeltaTime;
-        elapsedFrames++;
+        // Constants constants = {};
+        // {
+        //     constants.iResolution.x = gViewport.Width;
+        //     constants.iResolution.y = gViewport.Height;
+        //     constants.iTime         = elapsedSeconds;
+        //     constants.iFrame        = elapsedFrames;
+        //     constants.iTimeDelta    = gDeltaTime;
+        //     constants.iFrameRate    = 1.0f / gDeltaTime;
+        // }
+        // memcpy(mpUBOData, &constants, sizeof(Constants));
 
         D3D12_RECT scissor = {};
         {
@@ -922,6 +941,9 @@ namespace ICR
 
         // Dispatch all of the render passes in order.
         renderGraphExecutor.run(mRenderGraph).wait();
+
+        elapsedSeconds += gDeltaTime;
+        elapsedFrames++;
 
         // Blit final output into swapchain backbuffer.
         {
