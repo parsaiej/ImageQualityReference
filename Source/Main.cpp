@@ -8,6 +8,7 @@ extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\
 #include <RenderInput.h>
 #include <RenderInputShaderToy.h>
 #include <Interface.h>
+#include <Blitter.h>
 
 using namespace ICR;
 
@@ -115,6 +116,10 @@ namespace ICR
     tbb::task_group gTaskGroup;
 
     std::queue<std::function<void()>> gPreRenderTaskQueue;
+
+    std::unordered_map<std::string, ComPtr<ID3DBlob>> gShaderDXIL;
+
+    std::unique_ptr<Blitter> gBlitter;
 } // namespace ICR
 
 // Utility Prototypes
@@ -191,7 +196,13 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
     // We use glslang in case of shadertoy shader compilation to DXIL.
     glslang::InitializeProcess();
 
+    // Fetch all shader bytecodes.
+    LoadShaderByteCodes(gShaderDXIL);
+
     InitializeGraphicsRuntime();
+
+    // Create blitting instance.
+    gBlitter = std::make_unique<Blitter>();
 
     // Configure initial window size based on display-supplied resolutions.
     // -----------------------------------------

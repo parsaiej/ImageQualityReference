@@ -1,5 +1,6 @@
 #include <RenderInputShaderToy.h>
 #include <Util.h>
+#include <Blitter.h>
 #include <State.h>
 
 namespace ICR
@@ -11,7 +12,7 @@ namespace ICR
     static int   elapsedFrames  = 0;
 
     // Shorthand for getting current + history resources.
-    int GetCurrentFrameIndex() { return gInternalFrameIndex % 2; }
+    int GetCurrentFrameIndex() { return (gInternalFrameIndex + 0) % 2; }
     int GetHistoryFrameIndex() { return (gInternalFrameIndex + 1) % 2; }
 
     constexpr const char* kFragmentShaderShaderToyInputs = R"(
@@ -274,45 +275,23 @@ namespace ICR
             if (!CrossCompileSPIRVToDXIL("main", mSPIRV, renderPassDXIL))
                 throw std::runtime_error("Failed to cross-compile SPIR-V to DXIL.");
 
-            // 3) Load our matching fullscreen triangle vertex shader DXIL.
-            // ---------------------------
-
-            std::vector<uint8_t> fullscreenTriangleVertexShaderDXIL;
-            if (!ReadFileBytes("Shaders\\FullscreenTriangle.vert.dxil", fullscreenTriangleVertexShaderDXIL))
-                throw std::runtime_error("Failed to load fullscreen triangle vertex shader DXIL.");
-
-            // 4) Create Graphics PSO.
+            // 3) Create Graphics PSO.
             // --------------------------
-
-            D3D12_BLEND_DESC blendDesc               = {};
-            blendDesc.AlphaToCoverageEnable          = FALSE;
-            blendDesc.IndependentBlendEnable         = FALSE;
-            blendDesc.RenderTarget[0].BlendEnable    = FALSE;
-            blendDesc.RenderTarget[0].LogicOpEnable  = FALSE;
-            blendDesc.RenderTarget[0].SrcBlend       = D3D12_BLEND_ONE;
-            blendDesc.RenderTarget[0].DestBlend      = D3D12_BLEND_ZERO;
-            blendDesc.RenderTarget[0].BlendOp        = D3D12_BLEND_OP_ADD;
-            blendDesc.RenderTarget[0].SrcBlendAlpha  = D3D12_BLEND_ONE;
-            blendDesc.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ZERO;
-            blendDesc.RenderTarget[0].BlendOpAlpha   = D3D12_BLEND_OP_ADD;
-            blendDesc.RenderTarget[0].LogicOp        = D3D12_LOGIC_OP_NOOP;
-            blendDesc.RenderTarget[0].RenderTargetWriteMask =
-                D3D12_COLOR_WRITE_ENABLE_RED | D3D12_COLOR_WRITE_ENABLE_GREEN | D3D12_COLOR_WRITE_ENABLE_BLUE | D3D12_COLOR_WRITE_ENABLE_ALPHA;
 
             D3D12_GRAPHICS_PIPELINE_STATE_DESC shaderToyPSOInfo = {};
             {
-                shaderToyPSOInfo.PS                       = { renderPassDXIL.data(), renderPassDXIL.size() };
-                shaderToyPSOInfo.VS                       = { fullscreenTriangleVertexShaderDXIL.data(), fullscreenTriangleVertexShaderDXIL.size() };
-                shaderToyPSOInfo.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
-                shaderToyPSOInfo.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
-                shaderToyPSOInfo.RasterizerState.MultisampleEnable = FALSE;
-                shaderToyPSOInfo.BlendState                        = blendDesc;
-                shaderToyPSOInfo.PrimitiveTopologyType             = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-                shaderToyPSOInfo.SampleMask                        = UINT_MAX;
-                shaderToyPSOInfo.NumRenderTargets                  = 1;
-                shaderToyPSOInfo.RTVFormats[0]                     = outputFormat;
-                shaderToyPSOInfo.SampleDesc.Count                  = 1;
-                shaderToyPSOInfo.pRootSignature                    = args.pRootSignature;
+                const auto& fullscreenTriangleDXIL = gShaderDXIL["FullscreenTriangle.vert"];
+
+                shaderToyPSOInfo.PS                    = { renderPassDXIL.data(), renderPassDXIL.size() };
+                shaderToyPSOInfo.VS                    = { fullscreenTriangleDXIL->GetBufferPointer(), fullscreenTriangleDXIL->GetBufferSize() };
+                shaderToyPSOInfo.RasterizerState       = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+                shaderToyPSOInfo.BlendState            = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+                shaderToyPSOInfo.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+                shaderToyPSOInfo.SampleMask            = UINT_MAX;
+                shaderToyPSOInfo.NumRenderTargets      = 1;
+                shaderToyPSOInfo.RTVFormats[0]         = outputFormat;
+                shaderToyPSOInfo.SampleDesc.Count      = 1;
+                shaderToyPSOInfo.pRootSignature        = args.pRootSignature;
             }
 
             // Compile the PSO in the driver.
@@ -382,7 +361,7 @@ namespace ICR
             constants.iFrame        = elapsedFrames;
             constants.iTimeDelta    = gDeltaTime;
             constants.iFrameRate    = 1.0f / gDeltaTime;
-            constants.iAppParams0.x = mIntermediateRenderPass ? 1.0f : -1.0f;
+            constants.iAppParams0.x = mIntermediateRenderPass ? 1.0f : 0.0f;
         }
         memcpy(*pConstantData, &constants, sizeof(Constants));
 
@@ -503,7 +482,7 @@ namespace ICR
             std::array<CD3DX12_ROOT_PARAMETER1, 3> rootParameters;
             {
                 // Constants (includes the ShaderToy inputs).
-                rootParameters[0].InitAsConstantBufferView(0, 0, D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC, D3D12_SHADER_VISIBILITY_PIXEL);
+                rootParameters[0].InitAsConstantBufferView(0, 0, D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE, D3D12_SHADER_VISIBILITY_PIXEL);
 
                 // These can't be static samplers since it can vary per-pass.
                 rootParameters[1].InitAsDescriptorTable(1, &inputSMPRanges, D3D12_SHADER_VISIBILITY_PIXEL);
@@ -931,7 +910,7 @@ namespace ICR
         renderGraphExecutor.run(mRenderGraph).wait();
 
         elapsedSeconds += gDeltaTime;
-        elapsedFrames++;
+        elapsedFrames += 1;
 
         // Blit final output into swapchain backbuffer.
         {

@@ -19,7 +19,6 @@ float4 GetFullScreenTriangleVertexPosition(uint vertexID, float z = 0)
     return float4(uv * 2.0 - 1.0, z, 1.0);
 }
 
-
 Interpolators Main(uint vertexID : SV_VertexID)
 {
 	Interpolators i;

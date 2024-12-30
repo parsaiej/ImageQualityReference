@@ -49,6 +49,7 @@ add_executable(ImageQualityReference WIN32
     Source/Interface.cpp
     Source/Precompiled.cpp
     Source/RenderInputShaderToy.cpp
+    Source/Blitter.cpp
 )
 
 # Compile Options
@@ -114,3 +115,4 @@ configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/d3d12SDKLayers
 
 # Copy shader bytecodes. 
 configure_file(${CMAKE_SOURCE_DIR}/Assets/Shaders/Compiled/FullscreenTriangle.vert.dxil Shaders/FullscreenTriangle.vert.dxil COPYONLY)
+configure_file(${CMAKE_SOURCE_DIR}/Assets/Shaders/Compiled/Blit.frag.dxil Shaders/Blit.frag.dxil COPYONLY)

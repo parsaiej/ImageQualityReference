@@ -254,6 +254,8 @@ namespace ICR
                                    ID3D12CommandQueue*                             pCommandQueue,
                                    std::function<void(ID3D12GraphicsCommandList*)> recordCommandsFunc);
 
+    void LoadShaderByteCodes(std::unordered_map<std::string, ComPtr<ID3DBlob>>& shaderByteCodes);
+
 } // namespace ICR
 
 #endif

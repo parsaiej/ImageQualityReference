@@ -284,4 +284,18 @@ namespace ICR
         CloseHandle(fenceEvent);
     }
 
+    void LoadShaderByteCodes(std::unordered_map<std::string, ComPtr<ID3DBlob>>& shaderByteCodes)
+    {
+        for (auto& entry : std::filesystem::directory_iterator("Shaders\\"))
+        {
+            std::vector<uint8_t> shaderDXIL;
+            if (!ReadFileBytes(entry.path().string(), shaderDXIL))
+                throw std::runtime_error("Failed to load shader bytecode.");
+
+            auto& shaderByteCode = shaderByteCodes[entry.path().stem().string()];
+            ThrowIfFailed(D3DCreateBlob(shaderDXIL.size(), &shaderByteCode));
+            memcpy(shaderByteCode->GetBufferPointer(), shaderDXIL.data(), shaderDXIL.size());
+        }
+    }
+
 } // namespace ICR
