@@ -1,5 +1,6 @@
 #include <Blitter.h>
 #include <State.h>
+#include <ResourceRegistry.h>
 
 namespace ICR
 {
@@ -11,17 +12,13 @@ namespace ICR
         // Root Signature
         // -----------------------------
 
-        D3D12_DESCRIPTOR_RANGE1 inputSRVRanges = {};
+        std::array<CD3DX12_ROOT_PARAMETER1, 2> rootParameters;
         {
-            inputSRVRanges.RangeType          = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-            inputSRVRanges.NumDescriptors     = 1;
-            inputSRVRanges.BaseShaderRegister = 0;
-            inputSRVRanges.RegisterSpace      = 0;
-        }
+            // Bindless texture source index.
+            rootParameters[0].InitAsConstants(1, 0, 0, D3D12_SHADER_VISIBILITY_PIXEL);
 
-        std::array<CD3DX12_ROOT_PARAMETER1, 1> rootParameters;
-        {
-            rootParameters[0].InitAsDescriptorTable(1, &inputSRVRanges, D3D12_SHADER_VISIBILITY_PIXEL);
+            // Obtain the bindless descriptor table for texture 2D.
+            rootParameters[1] = *gResourceRegistry->GetDescriptorHeap(DescriptorHeap::Type::Texture2D)->GetRootParameter();
         }
 
         D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc = {};
@@ -68,24 +65,19 @@ namespace ICR
             blitPSOInfo.SampleDesc.Count                = 1;
         }
         ThrowIfFailed(gLogicalDevice->CreateGraphicsPipelineState(&blitPSOInfo, IID_PPV_ARGS(&mPSO)));
-
-        // Descriptors
-        // -----------------------------
-
-        D3D12_DESCRIPTOR_HEAP_DESC descriptorHeapDesc = {};
-        {
-            descriptorHeapDesc.NumDescriptors = 1;
-            descriptorHeapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-            descriptorHeapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-        }
-        ThrowIfFailed(gLogicalDevice->CreateDescriptorHeap(&descriptorHeapDesc, IID_PPV_ARGS(&mDescriptorHeap)));
     }
 
-    void Blitter::Dispatch(ID3D12GraphicsCommandList* pCmd)
+    void Blitter::Dispatch(const Params& params)
     {
+        auto* pCmd = params.pCmd;
+
+        gResourceRegistry->BindDescriptorHeaps(pCmd, DescriptorHeap::Type::Texture2D);
+
+        pCmd->OMSetRenderTargets(1u, &params.renderTargetDst, true, nullptr);
         pCmd->SetGraphicsRootSignature(mRootSignature.Get());
-        pCmd->SetDescriptorHeaps(1u, &mDescriptorHeap);
-        pCmd->SetGraphicsRootDescriptorTable(0u, mDescriptorHeap->GetGPUDescriptorHandleForHeapStart());
+        pCmd->SetGraphicsRoot32BitConstant(0u, params.bindlessDescriptorSrcIndex, 0u);
+        pCmd->SetGraphicsRootDescriptorTable(1u, gResourceRegistry->GetDescriptorHeap(DescriptorHeap::Type::Texture2D)->GetBaseAddressGPU());
+        pCmd->RSSetViewports(1u, &params.viewport);
         pCmd->SetPipelineState(mPSO.Get());
         pCmd->DrawInstanced(3u, 1u, 0u, 0u);
     }

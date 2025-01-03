@@ -60,12 +60,27 @@ namespace ICR
         else
             allocationDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
 
+        D3D12_CLEAR_VALUE* pClearValue = nullptr;
+
+        if ((resourceDesc.Flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0)
+        {
+            pClearValue           = new D3D12_CLEAR_VALUE();
+            pClearValue->Format   = resourceDesc.Format;
+            pClearValue->Color[0] = 0.0f;
+            pClearValue->Color[1] = 0.0f;
+            pClearValue->Color[2] = 0.0f;
+            pClearValue->Color[3] = 1.0f;
+        }
+
         ThrowIfFailed(mAllocator->CreateResource(&allocationDesc,
                                                  &resourceDesc,
                                                  D3D12_RESOURCE_STATE_COMMON,
-                                                 nullptr,
+                                                 pClearValue,
                                                  &mResources[handle.indexResource].primitiveAlloc,
                                                  IID_PPV_ARGS(&mResources[handle.indexResource].primitive)));
+
+        if (pClearValue)
+            delete pClearValue;
 
         AddResourceToDescriptorHeaps(handle, descriptorHeapFlags);
 

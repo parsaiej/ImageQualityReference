@@ -57,6 +57,14 @@ namespace ICR
                     mTable.RegisterSpace = REGISTER_SPACE_TEXTURE2D;
                     break;
                 }
+
+                case Constants:
+                {
+                    mTable.RangeType     = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+                    mTable.RegisterSpace = REGISTER_SPACE_CONSTANTS;
+                    break;
+                }
+
                 case RenderTarget:
                 {
                     // Not needed.

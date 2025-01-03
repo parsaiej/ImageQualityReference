@@ -62,15 +62,17 @@ namespace ICR
             return CD3DX12_GPU_DESCRIPTOR_HANDLE(mBaseAddressGPU, index, mDescriptorSize);
         }
 
-        inline ID3D12DescriptorHeap*         GetHeap() const { return mHeap.Get(); }
-        inline const D3D12_DESCRIPTOR_RANGE& GetTable() const { return mTable; }
-        inline const D3D12_ROOT_PARAMETER*   GetRootParameter() const { return &mRootParameter; }
+        inline D3D12_GPU_DESCRIPTOR_HANDLE GetBaseAddressGPU() const { return mBaseAddressGPU; }
+
+        inline ID3D12DescriptorHeap*          GetHeap() const { return mHeap.Get(); }
+        inline const D3D12_DESCRIPTOR_RANGE1& GetTable() const { return mTable; }
+        inline const CD3DX12_ROOT_PARAMETER1* GetRootParameter() const { return &mRootParameter; }
 
     private:
 
         ComPtr<ID3D12DescriptorHeap> mHeap;
-        D3D12_DESCRIPTOR_RANGE       mTable;
-        D3D12_ROOT_PARAMETER         mRootParameter;
+        D3D12_DESCRIPTOR_RANGE1      mTable;
+        CD3DX12_ROOT_PARAMETER1      mRootParameter;
         Type                         mType;
         D3D12_CPU_DESCRIPTOR_HANDLE  mBaseAddressCPU;
         D3D12_GPU_DESCRIPTOR_HANDLE  mBaseAddressGPU;

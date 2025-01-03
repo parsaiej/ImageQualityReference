@@ -39,7 +39,6 @@ namespace ICR
             float padding[28];
         };
 
-
         // Types are defined at runtime in the preample.
         layout (set = 1, binding = 0) uniform SAMPLER_TYPE0 iChannel0;
         layout (set = 1, binding = 1) uniform SAMPLER_TYPE1 iChannel1;
@@ -86,15 +85,6 @@ namespace ICR
         // Create output resources.
         // ------------------------------------------------
         {
-            // Create RTV heap for the output.
-            // ------------------------------------------------
-
-            D3D12_DESCRIPTOR_HEAP_DESC outputDescriptorHeapInfo = {};
-            {
-                outputDescriptorHeapInfo.NumDescriptors = 2;
-                outputDescriptorHeapInfo.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-            }
-            ThrowIfFailed(gLogicalDevice->CreateDescriptorHeap(&outputDescriptorHeapInfo, IID_PPV_ARGS(&mOutputResourceDescriptorHeap)));
 
             // Create viewport-sized buffers (current + prev.)
             // ------------------------------------------------
@@ -361,10 +351,6 @@ namespace ICR
 
         auto renderTargetsHeap = gResourceRegistry->GetDescriptorHeap(DescriptorHeap::Type::RenderTarget);
 
-        CD3DX12_CPU_DESCRIPTOR_HANDLE outputRenderTarget(mOutputResourceDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
-                                                         GetCurrentFrameIndex(),
-                                                         gRTVDescriptorSize);
-
         auto currentOutputRenderTargetView = renderTargetsHeap->GetAddressCPU(mOutputTargets[GetCurrentFrameIndex()].indexDescriptorRenderTarget);
         gCommandList->OMSetRenderTargets(1, &currentOutputRenderTargetView, FALSE, nullptr);
 
@@ -610,8 +596,6 @@ namespace ICR
             // Load the image
             // ------------------------------
 
-            // stbi_set_flip_vertically_on_load(true);
-
             int  width, height, channels;
             auto pImage = stbi_load_from_memory(data.data(), static_cast<int>(data.size()), &width, &height, &channels, STBI_rgb_alpha);
 
@@ -623,7 +607,7 @@ namespace ICR
 
             ResourceHandle mediaResourceHandle =
                 gResourceRegistry->CreateWithData(CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, width, height, 1, 1),
-                                                  DescriptorHeap::Type::Texture2D,
+                                                  0x0, // Manually manage descriptor heaps.
                                                   pImage,
                                                   width * height * 4);
 
@@ -841,31 +825,31 @@ namespace ICR
 
         // Blit final output into swapchain backbuffer.
         {
-            D3D12_RESOURCE_BARRIER transitionBarriers[2];
+            D3D12_RESOURCE_BARRIER transitionBarriers[1];
 
             auto pFinalPassOutputFrame = gResourceRegistry->Get(mpFinalRenderPass->GetOutputResources()[GetCurrentFrameIndex()]);
 
-            transitionBarriers[0] =
-                CD3DX12_RESOURCE_BARRIER::Transition(pFinalPassOutputFrame, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
+            transitionBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(pFinalPassOutputFrame,
+                                                                         D3D12_RESOURCE_STATE_RENDER_TARGET,
+                                                                         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 
-            auto* pSwapChainImageResource = gResourceRegistry->Get(gSwapChainImageHandles[gCurrentSwapChainImageIndex]);
+            gCommandList->ResourceBarrier(1, transitionBarriers);
 
-            transitionBarriers[1] =
-                CD3DX12_RESOURCE_BARRIER::Transition(pSwapChainImageResource, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_DEST);
+            Blitter::Params blitParams = {};
+            {
+                blitParams.pCmd                       = gCommandList.Get();
+                blitParams.bindlessDescriptorSrcIndex = mpFinalRenderPass->GetOutputResources()[GetCurrentFrameIndex()].indexDescriptorTexture2D;
+                blitParams.renderTargetDst            = gResourceRegistry->GetDescriptorHeap(DescriptorHeap::Type::RenderTarget)
+                                                 ->GetAddressCPU(gSwapChainImageHandles[gCurrentSwapChainImageIndex].indexDescriptorRenderTarget);
+                blitParams.viewport = gViewport;
+            }
+            gBlitter->Dispatch(blitParams);
 
-            gCommandList->ResourceBarrier(2, transitionBarriers);
+            transitionBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(pFinalPassOutputFrame,
+                                                                         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                                                                         D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-            CD3DX12_TEXTURE_COPY_LOCATION src(pFinalPassOutputFrame);
-            CD3DX12_TEXTURE_COPY_LOCATION dst(pSwapChainImageResource);
-            frameParams.pCmd->CopyTextureRegion(&dst, static_cast<UINT>(gViewport.TopLeftX), 0, 0, &src, nullptr);
-
-            transitionBarriers[0] =
-                CD3DX12_RESOURCE_BARRIER::Transition(pFinalPassOutputFrame, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
-
-            transitionBarriers[1] =
-                CD3DX12_RESOURCE_BARRIER::Transition(pSwapChainImageResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_RENDER_TARGET);
-
-            gCommandList->ResourceBarrier(2, transitionBarriers);
+            gCommandList->ResourceBarrier(1, transitionBarriers);
         }
 
         // Increment the internal frame index.

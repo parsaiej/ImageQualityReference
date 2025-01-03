@@ -40,7 +40,6 @@ namespace ICR
             ComPtr<ID3D12PipelineState>   mPSO;
             ComPtr<ID3D12DescriptorHeap>  mInputSamplerDescriptorHeap;
             ComPtr<ID3D12DescriptorHeap>  mInputResourceDescriptorHeap;
-            ComPtr<ID3D12DescriptorHeap>  mOutputResourceDescriptorHeap;
             std::vector<uint32_t>         mSPIRV;
             std::array<ResourceHandle, 2> mOutputTargets;
             std::unordered_map<int, int>  mInputToChannelMap;
