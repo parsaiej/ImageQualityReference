@@ -47,7 +47,7 @@ namespace ICR
 
         D3D12_GRAPHICS_PIPELINE_STATE_DESC blitPSOInfo = {};
         {
-            auto& fullscreenTriangleDXIL = gShaderDXIL["FullscreenTriangle.vert"];
+            auto& fullscreenTriangleDXIL = gShaderDXIL["FullscreenTriangleWithCoord.vert"];
             auto& blitDXIL               = gShaderDXIL["Blit.frag"];
 
             blitPSOInfo.pRootSignature                  = mRootSignature.Get();

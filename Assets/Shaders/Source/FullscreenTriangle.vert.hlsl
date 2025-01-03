@@ -1,6 +1,7 @@
 struct Interpolators
 {
 	float4 position : SV_Position;
+    float2 coord    : TEXCOORD0;
 };
 
 // Ref: https://github.com/Unity-Technologies/Graphics/blob/master/Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl#L1553
@@ -15,15 +16,17 @@ float2 GetFullScreenTriangleTexCoord(uint vertexID)
 float4 GetFullScreenTriangleVertexPosition(uint vertexID, float z = 0)
 {
     // note: the triangle vertex position coordinates are x2 so the returned UV coordinates are in range -1, 1 on the screen.
-    float2 uv = float2((vertexID << 1) & 2, vertexID & 2);
+    float2 uv = float2((vertexID << 1) & 2, 1.0 - (vertexID & 2));
     return float4(uv * 2.0 - 1.0, z, 1.0);
 }
+
 
 Interpolators Main(uint vertexID : SV_VertexID)
 {
 	Interpolators i;
 
 	i.position = GetFullScreenTriangleVertexPosition(vertexID);
+    i.coord    = GetFullScreenTriangleTexCoord(vertexID);
 
 	return i;
 }
