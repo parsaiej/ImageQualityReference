@@ -261,7 +261,7 @@ namespace ICR
 
             D3D12_GRAPHICS_PIPELINE_STATE_DESC shaderToyPSOInfo = {};
             {
-                const auto& fullscreenTriangleDXIL = gShaderDXIL["FullscreenTriangle.vert"];
+                const auto& fullscreenTriangleDXIL = gShaderDXIL["FullscreenTriangleWithCoord.vert"];
 
                 shaderToyPSOInfo.PS                    = { renderPassDXIL.data(), renderPassDXIL.size() };
                 shaderToyPSOInfo.VS                    = { fullscreenTriangleDXIL->GetBufferPointer(), fullscreenTriangleDXIL->GetBufferSize() };
@@ -520,7 +520,6 @@ namespace ICR
 
             try
             {
-                // NOTE: Will need a prepass to ensure the common file is found first.
                 RenderPass::Args renderPassArgs = { mRootSignature.Get(), renderPassInfo, mCommonShaderGLSL };
 
                 // Initialize the render pass.
@@ -607,7 +606,7 @@ namespace ICR
 
             ResourceHandle mediaResourceHandle =
                 gResourceRegistry->CreateWithData(CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, width, height, 1, 1),
-                                                  0x0, // Manually manage descriptor heaps.
+                                                  0x0, // Manually managed descriptor heaps.
                                                   pImage,
                                                   width * height * 4);
 
@@ -646,6 +645,7 @@ namespace ICR
     {
         // 1) Download the shader toy shader.
         // -----------------------------------
+
         auto data = QueryURL<std::string>("https://www.shadertoy.com/api/v1/shaders/" + shaderID.substr(0, 6) + "?key=BtrjRM");
 
         // 2) Parse result into JSON.

@@ -21,11 +21,30 @@ namespace ICR
             rootParameters[1] = *gResourceRegistry->GetDescriptorHeap(DescriptorHeap::Type::Texture2D)->GetRootParameter();
         }
 
+        D3D12_STATIC_SAMPLER_DESC staticClampPointSampler = {};
+        {
+            staticClampPointSampler.Filter           = D3D12_FILTER_MIN_MAG_MIP_POINT;
+            staticClampPointSampler.AddressU         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+            staticClampPointSampler.AddressV         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+            staticClampPointSampler.AddressW         = D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+            staticClampPointSampler.MipLODBias       = 0;
+            staticClampPointSampler.MaxAnisotropy    = 0;
+            staticClampPointSampler.ComparisonFunc   = D3D12_COMPARISON_FUNC_NEVER;
+            staticClampPointSampler.BorderColor      = D3D12_STATIC_BORDER_COLOR_TRANSPARENT_BLACK;
+            staticClampPointSampler.MinLOD           = 0.0f;
+            staticClampPointSampler.MaxLOD           = D3D12_FLOAT32_MAX;
+            staticClampPointSampler.ShaderRegister   = 0;
+            staticClampPointSampler.RegisterSpace    = 0;
+            staticClampPointSampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        }
+
         D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc = {};
 
-        rootSignatureDesc.Version                = D3D_ROOT_SIGNATURE_VERSION_1_0;
-        rootSignatureDesc.Desc_1_0.NumParameters = static_cast<UINT>(rootParameters.size());
-        rootSignatureDesc.Desc_1_0.pParameters   = reinterpret_cast<const D3D12_ROOT_PARAMETER*>(rootParameters.data());
+        rootSignatureDesc.Version                    = D3D_ROOT_SIGNATURE_VERSION_1_0;
+        rootSignatureDesc.Desc_1_0.NumParameters     = static_cast<UINT>(rootParameters.size());
+        rootSignatureDesc.Desc_1_0.pParameters       = reinterpret_cast<const D3D12_ROOT_PARAMETER*>(rootParameters.data());
+        rootSignatureDesc.Desc_1_0.NumStaticSamplers = 1;
+        rootSignatureDesc.Desc_1_0.pStaticSamplers   = &staticClampPointSampler;
 
         ComPtr<ID3DBlob> pBlobSignature;
         ComPtr<ID3DBlob> pBlobError;
@@ -47,7 +66,7 @@ namespace ICR
 
         D3D12_GRAPHICS_PIPELINE_STATE_DESC blitPSOInfo = {};
         {
-            auto& fullscreenTriangleDXIL = gShaderDXIL["FullscreenTriangleWithCoord.vert"];
+            auto& fullscreenTriangleDXIL = gShaderDXIL["FullscreenTriangle.vert"];
             auto& blitDXIL               = gShaderDXIL["Blit.frag"];
 
             blitPSOInfo.pRootSignature                  = mRootSignature.Get();
