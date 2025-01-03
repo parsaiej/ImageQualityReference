@@ -26,6 +26,8 @@ namespace ICR
 
             void CreateInputResourceDescriptorTable(const std::unordered_map<int, std::array<ResourceHandle, 2>>& resourceCache);
 
+            void CreateOutputTargets();
+
             void Dispatch(ID3D12GraphicsCommandList* pCmd);
 
             inline const int&                          GetOutputID() const { return mOutputID; }

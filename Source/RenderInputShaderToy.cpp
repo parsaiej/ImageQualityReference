@@ -75,57 +75,7 @@ namespace ICR
         // Intermediate renderpasses need full float format and flipped viewport.
         mIntermediateRenderPass = args.renderPassInfo["type"] == "buffer";
 
-        DXGI_FORMAT outputFormat;
-
-        if (mIntermediateRenderPass)
-            outputFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
-        else
-            outputFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-
-        // Create output resources.
-        // ------------------------------------------------
-        {
-
-            // Create viewport-sized buffers (current + prev.)
-            // ------------------------------------------------
-            const float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-
-            auto CreateOutputColorBuffer = [&](ResourceHandle& colorBufferHandle)
-            {
-                auto colorBufferInfo = CD3DX12_RESOURCE_DESC::Tex2D(outputFormat,
-                                                                    static_cast<UINT>(gViewport.Width),
-                                                                    static_cast<UINT>(gViewport.Height),
-                                                                    1,
-                                                                    1,
-                                                                    1,
-                                                                    0,
-                                                                    D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
-
-                colorBufferHandle = gResourceRegistry->Create(colorBufferInfo, DescriptorHeap::Type::RenderTarget | DescriptorHeap::Type::Texture2D);
-            };
-
-            CreateOutputColorBuffer(mOutputTargets[0]);
-            CreateOutputColorBuffer(mOutputTargets[1]);
-
-            for (auto& outputTarget : mOutputTargets)
-            {
-                auto* pRenderTargetHeap = gResourceRegistry->GetDescriptorHeap(DescriptorHeap::Type::RenderTarget);
-
-                auto outputDescriptorHandle = pRenderTargetHeap->GetAddressCPU(outputTarget.indexDescriptorRenderTarget);
-
-                ExecuteCommandListAndWait(gLogicalDevice.Get(),
-                                          gCommandQueue.Get(),
-                                          [&](ID3D12GraphicsCommandList* pCmd)
-                                          {
-                                              auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(gResourceRegistry->Get(outputTarget),
-                                                                                                  D3D12_RESOURCE_STATE_COMMON,
-                                                                                                  D3D12_RESOURCE_STATE_RENDER_TARGET);
-
-                                              pCmd->ResourceBarrier(1, &barrier);
-                                              pCmd->ClearRenderTargetView(outputDescriptorHandle, clearColor, 0, nullptr);
-                                          });
-            }
-        }
+        CreateOutputTargets();
 
         // Create a descriptor heap for 4 samplers
         // ------------------------------------------------
@@ -261,7 +211,7 @@ namespace ICR
 
             D3D12_GRAPHICS_PIPELINE_STATE_DESC shaderToyPSOInfo = {};
             {
-                const auto& fullscreenTriangleDXIL = gShaderDXIL["FullscreenTriangleWithCoord.vert"];
+                const auto& fullscreenTriangleDXIL = gShaderDXIL["FullscreenTriangle.vert"];
 
                 shaderToyPSOInfo.PS                    = { renderPassDXIL.data(), renderPassDXIL.size() };
                 shaderToyPSOInfo.VS                    = { fullscreenTriangleDXIL->GetBufferPointer(), fullscreenTriangleDXIL->GetBufferSize() };
@@ -270,7 +220,7 @@ namespace ICR
                 shaderToyPSOInfo.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
                 shaderToyPSOInfo.SampleMask            = UINT_MAX;
                 shaderToyPSOInfo.NumRenderTargets      = 1;
-                shaderToyPSOInfo.RTVFormats[0]         = outputFormat;
+                shaderToyPSOInfo.RTVFormats[0]         = mIntermediateRenderPass ? DXGI_FORMAT_R32G32B32A32_FLOAT : DXGI_FORMAT_R8G8B8A8_UNORM;
                 shaderToyPSOInfo.SampleDesc.Count      = 1;
                 shaderToyPSOInfo.pRootSignature        = args.pRootSignature;
             }
@@ -278,6 +228,62 @@ namespace ICR
             // Compile the PSO in the driver.
             if (gLogicalDevice->CreateGraphicsPipelineState(&shaderToyPSOInfo, IID_PPV_ARGS(&mPSO)) != S_OK)
                 throw std::runtime_error("Failed to create graphics PSO.");
+        }
+    }
+
+    void RenderPass::CreateOutputTargets()
+    {
+        DXGI_FORMAT outputFormat;
+
+        if (mIntermediateRenderPass)
+            outputFormat = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        else
+            outputFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+        const float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+
+        auto CreateOutputColorBuffer = [&](ResourceHandle& colorBufferHandle)
+        {
+            if (colorBufferHandle.indexResource != UINT_MAX)
+                gResourceRegistry->Release(colorBufferHandle);
+
+            auto colorBufferInfo = CD3DX12_RESOURCE_DESC::Tex2D(outputFormat,
+                                                                static_cast<UINT>(gViewport.Width),
+                                                                static_cast<UINT>(gViewport.Height),
+                                                                1,
+                                                                1,
+                                                                1,
+                                                                0,
+                                                                D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
+
+            colorBufferHandle = gResourceRegistry->Create(colorBufferInfo, DescriptorHeap::Type::RenderTarget | DescriptorHeap::Type::Texture2D);
+        };
+
+        CreateOutputColorBuffer(mOutputTargets[0]);
+        CreateOutputColorBuffer(mOutputTargets[1]);
+
+        {
+            SetDebugName(gResourceRegistry->Get(mOutputTargets[0]), L"RenderPassOutputA");
+            SetDebugName(gResourceRegistry->Get(mOutputTargets[1]), L"RenderPassOutputB");
+        }
+
+        for (auto& outputTarget : mOutputTargets)
+        {
+            auto* pRenderTargetHeap = gResourceRegistry->GetDescriptorHeap(DescriptorHeap::Type::RenderTarget);
+
+            auto outputDescriptorHandle = pRenderTargetHeap->GetAddressCPU(outputTarget.indexDescriptorRenderTarget);
+
+            ExecuteCommandListAndWait(gLogicalDevice.Get(),
+                                      gCommandQueue.Get(),
+                                      [&](ID3D12GraphicsCommandList* pCmd)
+                                      {
+                                          auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(gResourceRegistry->Get(outputTarget),
+                                                                                              D3D12_RESOURCE_STATE_COMMON,
+                                                                                              D3D12_RESOURCE_STATE_RENDER_TARGET);
+
+                                          pCmd->ResourceBarrier(1, &barrier);
+                                          pCmd->ClearRenderTargetView(outputDescriptorHandle, clearColor, 0, nullptr);
+                                      });
         }
     }
 
@@ -663,7 +669,27 @@ namespace ICR
         return true;
     }
 
-    void RenderInputShaderToy::ResizeViewportTargets(const DirectX::XMINT2& dim) {}
+    void RenderInputShaderToy::ResizeViewportTargets(const DirectX::XMINT2& dim)
+    {
+        // Re-set internal frame counter.
+        gInternalFrameIndex = 0;
+
+        for (auto& renderPass : mRenderPasses)
+        {
+            // 1) Resize the output resources.
+            renderPass->CreateOutputTargets();
+
+            // 2) Update the resource cache.
+            mResourceCache[renderPass->GetOutputID()][0] = renderPass->GetOutputResources()[0];
+            mResourceCache[renderPass->GetOutputID()][1] = renderPass->GetOutputResources()[1];
+        }
+
+        for (auto& renderPass : mRenderPasses)
+        {
+            // 3) Re-create the input resource descriptor table.
+            renderPass->CreateInputResourceDescriptorTable(mResourceCache);
+        }
+    }
 
     void RenderInputShaderToy::RenderInterface()
     {
@@ -814,9 +840,9 @@ namespace ICR
 
         // Blit final output into swapchain backbuffer.
         {
-            D3D12_RESOURCE_BARRIER transitionBarriers[1];
-
             auto pFinalPassOutputFrame = gResourceRegistry->Get(mpFinalRenderPass->GetOutputResources()[GetCurrentFrameIndex()]);
+
+            D3D12_RESOURCE_BARRIER transitionBarriers[1];
 
             transitionBarriers[0] = CD3DX12_RESOURCE_BARRIER::Transition(pFinalPassOutputFrame,
                                                                          D3D12_RESOURCE_STATE_RENDER_TARGET,

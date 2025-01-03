@@ -511,6 +511,9 @@ void UpdateWindowAndSwapChain()
 
     gBackBufferSizePrev = gBackBufferSize;
     gWindowModePrev     = gWindowMode;
+
+    if (gRenderInput)
+        gRenderInput->ResizeViewportTargets({ static_cast<int32_t>(gViewport.Width), static_cast<int32_t>(gViewport.Height) });
 }
 
 void EnumerateOutputDisplays()

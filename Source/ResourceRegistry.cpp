@@ -148,6 +148,9 @@ namespace ICR
         mResources[handle.indexResource].primitive.Reset();
         mResources[handle.indexResource].primitiveAlloc.Reset();
 
+        if (handle.indexDescriptorTexture2D != UINT_MAX)
+            mDescriptorHeaps[DescriptorHeap::Type::Texture2D]->Free(handle.indexDescriptorTexture2D);
+
         mFreeIndices.push(handle.indexResource);
     }
 } // namespace ICR
