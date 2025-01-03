@@ -329,22 +329,10 @@ namespace ICR
 
     static std::mutex gRenderPassCommandMutex;
 
-    void RenderPass::Dispatch(ID3D12GraphicsCommandList* pCmd, void** pConstantData)
+    void RenderPass::Dispatch(ID3D12GraphicsCommandList* pCmd)
     {
         // Need to lock here because taskflow may dispatch two tasks at the same time that do not depend on each other.
         std::lock_guard<std::mutex> commandLock(gRenderPassCommandMutex);
-
-        Constants constants = {};
-        {
-            constants.iResolution.x = gViewport.Width;
-            constants.iResolution.y = gViewport.Height;
-            constants.iTime         = elapsedSeconds;
-            constants.iFrame        = elapsedFrames;
-            constants.iTimeDelta    = gDeltaTime;
-            constants.iFrameRate    = 1.0f / gDeltaTime;
-            constants.iAppParams0.x = mIntermediateRenderPass ? 1.0f : 0.0f;
-        }
-        memcpy(*pConstantData, &constants, sizeof(Constants));
 
         // Bind the output render target.
         // ------------------------------------------------
@@ -543,8 +531,7 @@ namespace ICR
             mResourceCache[renderPass->GetOutputID()][1] = renderPass->GetOutputResources()[1];
 
             // Insert the render pass into the render graph.
-            renderPassTaskMap[renderPass->GetOutputID()] =
-                mRenderGraph.emplace([this, renderPass]() { renderPass->Dispatch(mpActiveCommandList, &mpUBOData); });
+            renderPassTaskMap[renderPass->GetOutputID()] = mRenderGraph.emplace([this, renderPass]() { renderPass->Dispatch(mpActiveCommandList); });
         }
 
         // Parse all non-buffer inputs.
@@ -594,6 +581,8 @@ namespace ICR
 
             // Load the image
             // ------------------------------
+
+            stbi_set_flip_vertically_on_load(true);
 
             int  width, height, channels;
             auto pImage = stbi_load_from_memory(data.data(), static_cast<int>(data.size()), &width, &height, &channels, STBI_rgb_alpha);
@@ -778,16 +767,16 @@ namespace ICR
             default                                    : break;
         };
 
-        // Constants constants = {};
-        // {
-        //     constants.iResolution.x = gViewport.Width;
-        //     constants.iResolution.y = gViewport.Height;
-        //     constants.iTime         = elapsedSeconds;
-        //     constants.iFrame        = elapsedFrames;
-        //     constants.iTimeDelta    = gDeltaTime;
-        //     constants.iFrameRate    = 1.0f / gDeltaTime;
-        // }
-        // memcpy(mpUBOData, &constants, sizeof(Constants));
+        Constants constants = {};
+        {
+            constants.iResolution.x = gViewport.Width;
+            constants.iResolution.y = gViewport.Height;
+            constants.iTime         = elapsedSeconds;
+            constants.iFrame        = elapsedFrames;
+            constants.iTimeDelta    = gDeltaTime;
+            constants.iFrameRate    = 1.0f / gDeltaTime;
+        }
+        memcpy(mpUBOData, &constants, sizeof(Constants));
 
         D3D12_RECT scissor = {};
         {
@@ -839,9 +828,8 @@ namespace ICR
             {
                 blitParams.pCmd                       = gCommandList.Get();
                 blitParams.bindlessDescriptorSrcIndex = mpFinalRenderPass->GetOutputResources()[GetCurrentFrameIndex()].indexDescriptorTexture2D;
-                blitParams.renderTargetDst            = gResourceRegistry->GetDescriptorHeap(DescriptorHeap::Type::RenderTarget)
-                                                 ->GetAddressCPU(gSwapChainImageHandles[gCurrentSwapChainImageIndex].indexDescriptorRenderTarget);
-                blitParams.viewport = gViewport;
+                blitParams.renderTargetDst            = frameParams.currentSwapChainBufferRTV;
+                blitParams.viewport                   = gViewport;
             }
             gBlitter->Dispatch(blitParams);
 

@@ -202,9 +202,6 @@ _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR,
 
     InitializeGraphicsRuntime();
 
-    // Create blitting instance.
-    gBlitter = std::make_unique<Blitter>();
-
     // Configure initial window size based on display-supplied resolutions.
     // -----------------------------------------
     {
@@ -700,6 +697,10 @@ void InitializeGraphicsRuntime()
     // ------------------------------------------
 
     ThrowIfFailed(gLogicalDevice->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&gCommandAllocator)));
+
+    // ------------------------------------------
+
+    gBlitter = std::make_unique<Blitter>();
 
     // Initialize DirectSR device.
     // ------------------------------------------
