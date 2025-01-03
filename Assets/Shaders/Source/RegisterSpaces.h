@@ -1,0 +1,6 @@
+#ifndef REGISTER_SPACES
+#define REGISTER_SPACES
+
+#define REGISTER_SPACE_TEXTURE2D 1
+
+#endif

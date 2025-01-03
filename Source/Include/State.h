@@ -4,11 +4,14 @@
 #include <Util.h>
 #include <RenderInput.h>
 
-class Blitter;
-
 namespace ICR
 {
+    class Blitter;
+    class ResourceRegistry;
 
+    struct ResourceHandle;
+
+    // Main.cpp for documentation.
     extern D3DMemoryLeakReport                               gLeakReport;
     extern HINSTANCE                                         gInstance;
     extern GLFWwindow*                                       gWindow;
@@ -27,7 +30,7 @@ namespace ICR
     extern ComPtr<ID3D12DescriptorHeap>                      gImguiDescriptorHeapSRV;
     extern ComPtr<ID3D12CommandAllocator>                    gCommandAllocator;
     extern ComPtr<ID3D12GraphicsCommandList>                 gCommandList;
-    extern std::vector<ComPtr<ID3D12Resource>>               gSwapChainImages;
+    extern std::vector<ResourceHandle>                       gSwapChainImageHandles;
     extern uint32_t                                          gSwapChainImageCount;
     extern int                                               gDSRVariantIndex;
     extern std::vector<DSR_SUPERRES_VARIANT_DESC>            gDSRVariantDescs;
@@ -72,6 +75,7 @@ namespace ICR
     extern std::queue<std::function<void()>>                 gPreRenderTaskQueue;
     extern std::unordered_map<std::string, ComPtr<ID3DBlob>> gShaderDXIL;
     extern std::unique_ptr<Blitter>                          gBlitter;
+    extern std::unique_ptr<ResourceRegistry>                 gResourceRegistry;
 
 } // namespace ICR
 

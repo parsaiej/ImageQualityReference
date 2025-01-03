@@ -50,6 +50,8 @@ add_executable(ImageQualityReference WIN32
     Source/Precompiled.cpp
     Source/RenderInputShaderToy.cpp
     Source/Blitter.cpp
+    Source/ResourceRegistry.cpp
+    Source/DescriptorHeap.cpp
 )
 
 # Compile Options

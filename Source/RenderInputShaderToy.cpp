@@ -1,6 +1,7 @@
 #include <RenderInputShaderToy.h>
 #include <Util.h>
 #include <Blitter.h>
+#include <ResourceRegistry.h>
 #include <State.h>
 
 namespace ICR
@@ -921,14 +922,15 @@ namespace ICR
                                                      D3D12_RESOURCE_STATE_RENDER_TARGET,
                                                      D3D12_RESOURCE_STATE_COPY_SOURCE);
 
-            transitionBarriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(gSwapChainImages[gCurrentSwapChainImageIndex].Get(),
-                                                                         D3D12_RESOURCE_STATE_RENDER_TARGET,
-                                                                         D3D12_RESOURCE_STATE_COPY_DEST);
+            auto* pSwapChainImageResource = gResourceRegistry->Get(gSwapChainImageHandles[gCurrentSwapChainImageIndex]);
+
+            transitionBarriers[1] =
+                CD3DX12_RESOURCE_BARRIER::Transition(pSwapChainImageResource, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_DEST);
 
             gCommandList->ResourceBarrier(2, transitionBarriers);
 
             CD3DX12_TEXTURE_COPY_LOCATION src(mpFinalRenderPass->GetOutputResources()[GetCurrentFrameIndex()].resource.Get());
-            CD3DX12_TEXTURE_COPY_LOCATION dst(gSwapChainImages[gCurrentSwapChainImageIndex].Get());
+            CD3DX12_TEXTURE_COPY_LOCATION dst(pSwapChainImageResource);
             frameParams.pCmd->CopyTextureRegion(&dst, static_cast<UINT>(gViewport.TopLeftX), 0, 0, &src, nullptr);
 
             transitionBarriers[0] =
@@ -936,9 +938,8 @@ namespace ICR
                                                      D3D12_RESOURCE_STATE_COPY_SOURCE,
                                                      D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-            transitionBarriers[1] = CD3DX12_RESOURCE_BARRIER::Transition(gSwapChainImages[gCurrentSwapChainImageIndex].Get(),
-                                                                         D3D12_RESOURCE_STATE_COPY_DEST,
-                                                                         D3D12_RESOURCE_STATE_RENDER_TARGET);
+            transitionBarriers[1] =
+                CD3DX12_RESOURCE_BARRIER::Transition(pSwapChainImageResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
             gCommandList->ResourceBarrier(2, transitionBarriers);
         }
