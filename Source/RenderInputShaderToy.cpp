@@ -18,25 +18,31 @@ namespace ICR
 
     constexpr const char* kFragmentShaderShaderToyInputs = R"(
 
-        layout (set = 0, binding = 0) uniform UBO
+        layout (set = 0, binding = 0, std140) uniform UBO
         {
             // Add some application-specific inputs.
             vec4 iAppParams0;
 
             // Constant buffer adapted from ShaderToy inputs.
             vec3      iResolution;           // viewport resolution (in pixels)
+            float     ipadding0;
+
             float     iTime;                 // shader playback time (in seconds)
             float     iTimeDelta;            // render time (in seconds)
             float     iFrameRate;            // shader frame rate
             int       iFrame;                // shader playback frame
-            float     iChannelTime[4];       // channel playback time (in seconds)
-            vec3      iChannelResolution[4]; // channel resolution (in pixels)
+
+            vec4      iChannelTime;          // channel playback time (in seconds)
+            vec4      iChannelResolution[4]; // channel resolution (in pixels)
+
             vec4      iMouse;                // mouse pixel coords. xy: current (if MLB down), zw: click
             vec4      iDate;                 // (year, month, day, time in seconds)
+
+            vec3      ipadding1;
             float     iSampleRate;           // sound sample rate (i.e., 44100)
 
             // Pad-up to 256 bytes.
-            float padding[28];
+            vec4 padding[5];
         };
 
         // Types are defined at runtime in the preample.
@@ -801,6 +807,10 @@ namespace ICR
             constants.iFrame        = elapsedFrames;
             constants.iTimeDelta    = gDeltaTime;
             constants.iFrameRate    = 1.0f / gDeltaTime;
+            constants.iMouse.x      = ImGui::GetMousePos().x;
+            constants.iMouse.y      = ImGui::GetMousePos().y;
+            constants.iMouse.z      = 1; // ImGui::IsAnyMouseDown();
+            constants.iMouse.w      = ImGui::IsAnyMouseDown();
         }
         memcpy(mpUBOData, &constants, sizeof(Constants));
 

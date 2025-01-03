@@ -56,23 +56,31 @@ namespace ICR
             Failed
         };
 
-        struct Constants
+        struct alignas(16) Constants
         {
             DirectX::XMFLOAT4 iAppParams0;
 
             DirectX::XMFLOAT3 iResolution;
-            float             iTime;
-            float             iTimeDelta;
-            float             iFrameRate;
-            int               iFrame;
-            float             iChannelTime[4];
-            DirectX::XMFLOAT3 iChannelResolution[4];
+            float             _padding0;
+
+            float iTime;
+            float iTimeDelta;
+            float iFrameRate;
+            int   iFrame;
+
+            DirectX::XMFLOAT4 iChannelTime;
+
+            DirectX::XMFLOAT4 iChannelResolution[4];
+
             DirectX::XMFLOAT4 iMouse;
+
             DirectX::XMFLOAT4 iDate;
+
+            DirectX::XMFLOAT3 _padding1;
             float             iSampleRate;
 
             // Pad-up to 256 bytes.
-            float padding[28];
+            DirectX::XMFLOAT4 padding[5];
         };
 
         RenderInputShaderToy();
