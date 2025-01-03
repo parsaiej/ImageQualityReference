@@ -71,7 +71,6 @@ namespace ICR
     extern tbb::task_group                                   gTaskGroup;
     extern RenderInputMode                                   gRenderInputMode;
     extern std::unique_ptr<RenderInput>                      gRenderInput;
-    extern ComPtr<D3D12MA::Allocator>                        gMemoryAllocator;
     extern std::queue<std::function<void()>>                 gPreRenderTaskQueue;
     extern std::unordered_map<std::string, ComPtr<ID3DBlob>> gShaderDXIL;
     extern std::unique_ptr<Blitter>                          gBlitter;

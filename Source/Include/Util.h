@@ -30,17 +30,6 @@ namespace ICR
 
     // ---------------------------
 
-    struct DeviceResource
-    {
-        ComPtr<ID3D12Resource> resource;
-        CD3DX12_RESOURCE_DESC  resourceDesc;
-
-        ComPtr<D3D12MA::Allocation> allocation;
-        D3D12MA::ALLOCATION_DESC    allocationDesc;
-    };
-
-    // ---------------------------
-
     class StopWatch
     {
     public:

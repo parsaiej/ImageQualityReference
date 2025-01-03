@@ -10,6 +10,8 @@ namespace ICR
         uint32_t indexResource               = UINT_MAX;
         uint32_t indexDescriptorTexture2D    = UINT_MAX;
         uint32_t indexDescriptorRenderTarget = UINT_MAX;
+        uint32_t indexDescriptorConstants    = UINT_MAX;
+        uint32_t indexDescriptorRawBuffer    = UINT_MAX;
     };
 
     class ResourceRegistry
@@ -25,7 +27,7 @@ namespace ICR
         ResourceRegistry();
 
         // Creates a device resource with bound memory and returns a handle.
-        ResourceHandle Create(const CD3DX12_RESOURCE_DESC& resourceInfo, DescriptorHeapFlags descriptorHeapFlags);
+        ResourceHandle Create(const CD3DX12_RESOURCE_DESC& resourceInfo, DescriptorHeapFlags descriptorHeapFlags, bool hostVisible = false);
 
         // Optional version that can wrap an existing D3D12 resource with a handle + descriptor views.
         ResourceHandle Create(ID3D12Resource* pResource, DescriptorHeapFlags descriptorHeapFlags);
@@ -35,6 +37,8 @@ namespace ICR
                                       DescriptorHeapFlags          descriptorHeapFlags,
                                       const void*                  data,
                                       size_t                       size);
+
+        void BindDescriptorHeaps(ID3D12GraphicsCommandList* pCmd, DescriptorHeapFlags descriptorHeapFlags);
 
         // Frees a resource with a provided handle.
         void Release(const ResourceHandle& handle);
@@ -73,6 +77,7 @@ namespace ICR
 
         void AddResourceToDescriptorHeaps(ResourceHandle& handle, DescriptorHeapFlags descriptorHeapFlags);
 
+        ResourceHandle                                                            mStagingBuffer;
         uint32_t                                                                  mMaxAllocations;
         ComPtr<D3D12MA::Allocator>                                                mAllocator;
         std::vector<Resource>                                                     mResources;

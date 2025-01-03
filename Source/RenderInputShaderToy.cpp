@@ -100,50 +100,40 @@ namespace ICR
             // ------------------------------------------------
             const float clearColor[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
 
-            auto CreateOutputColorBuffer = [&](DeviceResource& viewportSizedColorBuffer)
+            auto CreateOutputColorBuffer = [&](ResourceHandle& colorBufferHandle)
             {
-                viewportSizedColorBuffer.resourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(outputFormat,
-                                                                                     static_cast<UINT>(gViewport.Width),
-                                                                                     static_cast<UINT>(gViewport.Height),
-                                                                                     1,
-                                                                                     1,
-                                                                                     1,
-                                                                                     0,
-                                                                                     D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
+                auto colorBufferInfo = CD3DX12_RESOURCE_DESC::Tex2D(outputFormat,
+                                                                    static_cast<UINT>(gViewport.Width),
+                                                                    static_cast<UINT>(gViewport.Height),
+                                                                    1,
+                                                                    1,
+                                                                    1,
+                                                                    0,
+                                                                    D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
 
-                viewportSizedColorBuffer.allocationDesc = { D3D12MA::ALLOCATION_FLAG_NONE, D3D12_HEAP_TYPE_DEFAULT };
-
-                D3D12_CLEAR_VALUE clearValue = {};
-                clearValue.Format            = outputFormat;
-                memcpy(clearValue.Color, clearColor, sizeof(clearColor));
-
-                ThrowIfFailed(gMemoryAllocator->CreateResource(&viewportSizedColorBuffer.allocationDesc,
-                                                               &viewportSizedColorBuffer.resourceDesc,
-                                                               D3D12_RESOURCE_STATE_RENDER_TARGET,
-                                                               &clearValue,
-                                                               &viewportSizedColorBuffer.allocation,
-                                                               IID_PPV_ARGS(&viewportSizedColorBuffer.resource)));
+                colorBufferHandle = gResourceRegistry->Create(colorBufferInfo, DescriptorHeap::Type::RenderTarget | DescriptorHeap::Type::Texture2D);
             };
 
             CreateOutputColorBuffer(mOutputTargets[0]);
             CreateOutputColorBuffer(mOutputTargets[1]);
 
-            // Create RTVs for the output.
-            // ------------------------------------------------
-
-            CD3DX12_CPU_DESCRIPTOR_HANDLE outputDescriptorHandle(mOutputResourceDescriptorHeap->GetCPUDescriptorHandleForHeapStart());
-
             for (auto& outputTarget : mOutputTargets)
             {
-                gLogicalDevice->CreateRenderTargetView(outputTarget.resource.Get(), nullptr, outputDescriptorHandle);
+                auto* pRenderTargetHeap = gResourceRegistry->GetDescriptorHeap(DescriptorHeap::Type::RenderTarget);
 
-                // Clear the render target to black.
+                auto outputDescriptorHandle = pRenderTargetHeap->GetAddressCPU(outputTarget.indexDescriptorRenderTarget);
+
                 ExecuteCommandListAndWait(gLogicalDevice.Get(),
                                           gCommandQueue.Get(),
                                           [&](ID3D12GraphicsCommandList* pCmd)
-                                          { pCmd->ClearRenderTargetView(outputDescriptorHandle, clearColor, 0, nullptr); });
+                                          {
+                                              auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(gResourceRegistry->Get(outputTarget),
+                                                                                                  D3D12_RESOURCE_STATE_COMMON,
+                                                                                                  D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-                outputDescriptorHandle.Offset(1, gRTVDescriptorSize);
+                                              pCmd->ResourceBarrier(1, &barrier);
+                                              pCmd->ClearRenderTargetView(outputDescriptorHandle, clearColor, 0, nullptr);
+                                          });
             }
         }
 
@@ -301,7 +291,7 @@ namespace ICR
         }
     }
 
-    void RenderPass::CreateInputResourceDescriptorTable(const std::unordered_map<int, std::array<ID3D12Resource*, 2>>& resourceCache)
+    void RenderPass::CreateInputResourceDescriptorTable(const std::unordered_map<int, std::array<ResourceHandle, 2>>& resourceCache)
     {
         // Create a descriptor heap for 4 resources x 2 frames (history).
         // ------------------------------------------------
@@ -329,7 +319,7 @@ namespace ICR
                 // Create SRV for the resource.
                 // ------------------------------------------------
 
-                auto* pResource = resourceCache.at(inputID)[frameIndex];
+                auto* pResource = gResourceRegistry->Get(resourceCache.at(inputID)[frameIndex]);
 
                 // Recover the image's format.
                 auto resourceInfo = pResource->GetDesc();
@@ -368,11 +358,15 @@ namespace ICR
 
         // Bind the output render target.
         // ------------------------------------------------
+
+        auto renderTargetsHeap = gResourceRegistry->GetDescriptorHeap(DescriptorHeap::Type::RenderTarget);
+
         CD3DX12_CPU_DESCRIPTOR_HANDLE outputRenderTarget(mOutputResourceDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
                                                          GetCurrentFrameIndex(),
                                                          gRTVDescriptorSize);
 
-        gCommandList->OMSetRenderTargets(1, &outputRenderTarget, FALSE, nullptr);
+        auto currentOutputRenderTargetView = renderTargetsHeap->GetAddressCPU(mOutputTargets[GetCurrentFrameIndex()].indexDescriptorRenderTarget);
+        gCommandList->OMSetRenderTargets(1, &currentOutputRenderTargetView, FALSE, nullptr);
 
         // Bind the input heaps.
         // ------------------------------------------------
@@ -427,38 +421,9 @@ namespace ICR
         //  Resources
         // ---------------------------
 
-        mUBO.resourceDesc   = CD3DX12_RESOURCE_DESC::Buffer(sizeof(Constants));
-        mUBO.allocationDesc = { D3D12MA::ALLOCATION_FLAG_NONE, D3D12_HEAP_TYPE_UPLOAD };
+        mUBO = gResourceRegistry->Create(CD3DX12_RESOURCE_DESC::Buffer(sizeof(Constants)), DescriptorHeap::Type::Constants, true);
 
-        ThrowIfFailed(gMemoryAllocator->CreateResource(&mUBO.allocationDesc,
-                                                       &mUBO.resourceDesc,
-                                                       D3D12_RESOURCE_STATE_GENERIC_READ,
-                                                       nullptr,
-                                                       &mUBO.allocation,
-                                                       IID_PPV_ARGS(&mUBO.resource)));
-
-        ThrowIfFailed(mUBO.resource->Map(0, nullptr, &mpUBOData));
-
-        // Descriptor heaps.
-        // ---------------------------
-
-        D3D12_DESCRIPTOR_HEAP_DESC constantBufferViewHeapDesc = {};
-        {
-            constantBufferViewHeapDesc.NumDescriptors = 1;
-            constantBufferViewHeapDesc.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-            constantBufferViewHeapDesc.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-        }
-        ThrowIfFailed(gLogicalDevice->CreateDescriptorHeap(&constantBufferViewHeapDesc, IID_PPV_ARGS(&mUBOHeap)));
-
-        // Resource views
-        // ---------------------------
-
-        D3D12_CONSTANT_BUFFER_VIEW_DESC constantBufferViewDesc = {};
-        {
-            constantBufferViewDesc.BufferLocation = mUBO.resource->GetGPUVirtualAddress();
-            constantBufferViewDesc.SizeInBytes    = sizeof(Constants);
-        }
-        gLogicalDevice->CreateConstantBufferView(&constantBufferViewDesc, mUBOHeap->GetCPUDescriptorHandleForHeapStart());
+        ThrowIfFailed(gResourceRegistry->Get(mUBO)->Map(0, nullptr, &mpUBOData));
 
         // Create the root signature (same for all render passes).
         // ---------------------------
@@ -589,8 +554,8 @@ namespace ICR
                 mpFinalRenderPass = renderPass;
 
             // Insert the render pass output into the input provider.
-            mResourceCache[renderPass->GetOutputID()][0] = renderPass->GetOutputResources()[0].resource.Get();
-            mResourceCache[renderPass->GetOutputID()][1] = renderPass->GetOutputResources()[1].resource.Get();
+            mResourceCache[renderPass->GetOutputID()][0] = renderPass->GetOutputResources()[0];
+            mResourceCache[renderPass->GetOutputID()][1] = renderPass->GetOutputResources()[1];
 
             // Insert the render pass into the render graph.
             renderPassTaskMap[renderPass->GetOutputID()] =
@@ -656,57 +621,17 @@ namespace ICR
                 return false;
             }
 
-            // Create the dedicated resource.
-            // -------------------------------
-
-            DeviceResource dedicatedMemory;
-
-            dedicatedMemory.resourceDesc   = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, width, height, 1, 1);
-            dedicatedMemory.allocationDesc = { D3D12MA::ALLOCATION_FLAG_NONE, D3D12_HEAP_TYPE_DEFAULT };
-
-            ThrowIfFailed(gMemoryAllocator->CreateResource(&dedicatedMemory.allocationDesc,
-                                                           &dedicatedMemory.resourceDesc,
-                                                           D3D12_RESOURCE_STATE_COMMON,
-                                                           nullptr,
-                                                           &dedicatedMemory.allocation,
-                                                           IID_PPV_ARGS(&dedicatedMemory.resource)));
-
-            // Create the upload resource.
-            // -------------------------------
-
-            DeviceResource scratchMemory;
-
-            scratchMemory.resourceDesc   = CD3DX12_RESOURCE_DESC::Buffer(GetRequiredIntermediateSize(dedicatedMemory.resource.Get(), 0, 1));
-            scratchMemory.allocationDesc = { D3D12MA::ALLOCATION_FLAG_NONE, D3D12_HEAP_TYPE_UPLOAD };
-
-            ThrowIfFailed(gMemoryAllocator->CreateResource(&scratchMemory.allocationDesc,
-                                                           &scratchMemory.resourceDesc,
-                                                           D3D12_RESOURCE_STATE_COMMON,
-                                                           nullptr,
-                                                           &scratchMemory.allocation,
-                                                           IID_PPV_ARGS(&scratchMemory.resource)));
-
-            // Copy from staging -> dedicated memory.
-            // -------------------------------
-
-            ExecuteCommandListAndWait(
-                gLogicalDevice.Get(),
-                gCommandQueue.Get(),
-                [&](ID3D12GraphicsCommandList* pCmd)
-                {
-                    D3D12_SUBRESOURCE_DATA subresourceData = {};
-                    subresourceData.pData                  = pImage;
-                    subresourceData.RowPitch               = width * 4;
-                    subresourceData.SlicePitch             = subresourceData.RowPitch * height;
-
-                    UpdateSubresources(pCmd, dedicatedMemory.resource.Get(), scratchMemory.resource.Get(), 0, 0, 1, &subresourceData);
-                });
+            ResourceHandle mediaResourceHandle =
+                gResourceRegistry->CreateWithData(CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R8G8B8A8_UNORM, width, height, 1, 1),
+                                                  DescriptorHeap::Type::Texture2D,
+                                                  pImage,
+                                                  width * height * 4);
 
             // Transfer the resource to the media resource cache.
-            mMediaResources.push_back(std::move(dedicatedMemory));
+            mMediaResources.push_back(std::move(mediaResourceHandle));
 
             // And specify it here.
-            mResourceCache[mediaInputId][0] = mMediaResources.back().resource.Get();
+            mResourceCache[mediaInputId][0] = mMediaResources.back();
             mResourceCache[mediaInputId][1] = mResourceCache[mediaInputId][0]; // No history for media.
         }
 
@@ -896,10 +821,11 @@ namespace ICR
         frameParams.pCmd->RSSetViewports(1U, &viewport);
         frameParams.pCmd->RSSetScissorRects(1U, &scissor);
 
+        gResourceRegistry->BindDescriptorHeaps(frameParams.pCmd, DescriptorHeap::Type::Constants);
+
         // Root signature is the same for all render passes, so set it once.
         frameParams.pCmd->SetGraphicsRootSignature(mRootSignature.Get());
-        frameParams.pCmd->SetDescriptorHeaps(1U, mUBOHeap.GetAddressOf());
-        frameParams.pCmd->SetGraphicsRootConstantBufferView(0u, mUBO.resource->GetGPUVirtualAddress());
+        frameParams.pCmd->SetGraphicsRootConstantBufferView(0u, gResourceRegistry->Get(mUBO)->GetGPUVirtualAddress());
         frameParams.pCmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
         // Configure the active command lists.
@@ -917,10 +843,10 @@ namespace ICR
         {
             D3D12_RESOURCE_BARRIER transitionBarriers[2];
 
+            auto pFinalPassOutputFrame = gResourceRegistry->Get(mpFinalRenderPass->GetOutputResources()[GetCurrentFrameIndex()]);
+
             transitionBarriers[0] =
-                CD3DX12_RESOURCE_BARRIER::Transition(mpFinalRenderPass->GetOutputResources()[GetCurrentFrameIndex()].resource.Get(),
-                                                     D3D12_RESOURCE_STATE_RENDER_TARGET,
-                                                     D3D12_RESOURCE_STATE_COPY_SOURCE);
+                CD3DX12_RESOURCE_BARRIER::Transition(pFinalPassOutputFrame, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_COPY_SOURCE);
 
             auto* pSwapChainImageResource = gResourceRegistry->Get(gSwapChainImageHandles[gCurrentSwapChainImageIndex]);
 
@@ -929,14 +855,12 @@ namespace ICR
 
             gCommandList->ResourceBarrier(2, transitionBarriers);
 
-            CD3DX12_TEXTURE_COPY_LOCATION src(mpFinalRenderPass->GetOutputResources()[GetCurrentFrameIndex()].resource.Get());
+            CD3DX12_TEXTURE_COPY_LOCATION src(pFinalPassOutputFrame);
             CD3DX12_TEXTURE_COPY_LOCATION dst(pSwapChainImageResource);
             frameParams.pCmd->CopyTextureRegion(&dst, static_cast<UINT>(gViewport.TopLeftX), 0, 0, &src, nullptr);
 
             transitionBarriers[0] =
-                CD3DX12_RESOURCE_BARRIER::Transition(mpFinalRenderPass->GetOutputResources()[GetCurrentFrameIndex()].resource.Get(),
-                                                     D3D12_RESOURCE_STATE_COPY_SOURCE,
-                                                     D3D12_RESOURCE_STATE_RENDER_TARGET);
+                CD3DX12_RESOURCE_BARRIER::Transition(pFinalPassOutputFrame, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
             transitionBarriers[1] =
                 CD3DX12_RESOURCE_BARRIER::Transition(pSwapChainImageResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_RENDER_TARGET);
@@ -953,21 +877,17 @@ namespace ICR
         if (!mInitialized)
             return;
 
-        for (auto& mediaResources : mMediaResources)
-        {
-            mediaResources.resource.Reset();
-            mediaResources.allocation.Reset();
-        }
+        for (auto& handle : mMediaResources)
+            gResourceRegistry->Release(handle);
 
         mShaderAPIRequestResult.clear();
         mRenderGraph.clear();
         mRenderPasses.clear();
         mCommonShaderGLSL.clear();
 
-        mUBO.resource->Unmap(0, nullptr);
-        mUBO.allocation.Reset();
-        mUBO.resource.Reset();
-        mUBOHeap.Reset();
+        gResourceRegistry->Get(mUBO)->Unmap(0, nullptr);
+        gResourceRegistry->Release(mUBO);
+
         mRootSignature.Reset();
         mPSO.Reset();
 

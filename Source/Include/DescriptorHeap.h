@@ -14,7 +14,9 @@ namespace ICR
         enum Type
         {
             Texture2D    = 1 << 0,
-            RenderTarget = 1 << 1
+            RenderTarget = 1 << 1,
+            Constants    = 1 << 2,
+            RawBuffer    = 1 << 3
         };
 
         DescriptorHeap(Type);

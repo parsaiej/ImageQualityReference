@@ -20,6 +20,10 @@ namespace ICR
 
         mDescriptorHeaps[DescriptorHeap::Type::Texture2D]    = std::make_unique<DescriptorHeap>(DescriptorHeap::Type::Texture2D);
         mDescriptorHeaps[DescriptorHeap::Type::RenderTarget] = std::make_unique<DescriptorHeap>(DescriptorHeap::Type::RenderTarget);
+        mDescriptorHeaps[DescriptorHeap::Type::Constants]    = std::make_unique<DescriptorHeap>(DescriptorHeap::Type::Constants);
+        mDescriptorHeaps[DescriptorHeap::Type::RawBuffer]    = std::make_unique<DescriptorHeap>(DescriptorHeap::Type::RawBuffer);
+
+        mStagingBuffer = Create(CD3DX12_RESOURCE_DESC::Buffer(32 * 1024 * 1024), 0x0, true);
     }
 
     void ResourceRegistry::AddResourceToDescriptorHeaps(ResourceHandle& handle, DescriptorHeapFlags descriptorHeapFlags)
@@ -44,12 +48,17 @@ namespace ICR
         return handle;
     }
 
-    ResourceHandle ResourceRegistry::Create(const CD3DX12_RESOURCE_DESC& resourceDesc, DescriptorHeapFlags descriptorHeapFlags)
+    ResourceHandle ResourceRegistry::Create(const CD3DX12_RESOURCE_DESC& resourceDesc, DescriptorHeapFlags descriptorHeapFlags, bool hostVisible)
     {
         ResourceHandle handle;
         handle.indexResource = Allocate();
 
         D3D12MA::ALLOCATION_DESC allocationDesc = { D3D12MA::ALLOCATION_FLAG_NONE, D3D12_HEAP_TYPE_DEFAULT };
+
+        if (hostVisible)
+            allocationDesc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
+        else
+            allocationDesc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
 
         ThrowIfFailed(mAllocator->CreateResource(&allocationDesc,
                                                  &resourceDesc,
@@ -61,6 +70,59 @@ namespace ICR
         AddResourceToDescriptorHeaps(handle, descriptorHeapFlags);
 
         return handle;
+    }
+
+    ResourceHandle ResourceRegistry::CreateWithData(const CD3DX12_RESOURCE_DESC& resourceInfo,
+                                                    DescriptorHeapFlags          descriptorHeapFlags,
+                                                    const void*                  data,
+                                                    size_t                       size)
+    {
+        ResourceHandle handle = Create(resourceInfo, descriptorHeapFlags);
+
+        void* pMappedData = nullptr;
+        {
+            D3D12_RANGE range = { 0, 0 };
+            ThrowIfFailed(mResources[mStagingBuffer.indexResource].primitive->Map(0, &range, &pMappedData));
+        }
+
+        memcpy(pMappedData, data, size);
+
+        mResources[mStagingBuffer.indexResource].primitive->Unmap(0, nullptr);
+
+        ExecuteCommandListAndWait(gLogicalDevice.Get(),
+                                  gCommandQueue.Get(),
+                                  [&](ID3D12GraphicsCommandList* pCmd)
+                                  {
+                                      D3D12_SUBRESOURCE_DATA subresourceData = {};
+                                      subresourceData.pData                  = pMappedData;
+                                      subresourceData.RowPitch               = resourceInfo.Width * 4;
+                                      subresourceData.SlicePitch             = subresourceData.RowPitch * resourceInfo.Height;
+
+                                      UpdateSubresources(pCmd,
+                                                         mResources[handle.indexResource].primitive.Get(),
+                                                         mResources[mStagingBuffer.indexResource].primitive.Get(),
+                                                         0,
+                                                         0,
+                                                         1,
+                                                         &subresourceData);
+                                  });
+
+        return handle;
+    }
+
+    void ResourceRegistry::BindDescriptorHeaps(ID3D12GraphicsCommandList* pCmd, DescriptorHeapFlags descriptorHeapFlags)
+    {
+        ID3D12DescriptorHeap* pHeaps[4];
+
+        uint32_t heapCount = 0;
+
+        if ((descriptorHeapFlags & DescriptorHeap::Type::Texture2D) != 0)
+            pHeaps[heapCount++] = mDescriptorHeaps[DescriptorHeap::Type::Texture2D]->GetHeap();
+
+        if ((descriptorHeapFlags & DescriptorHeap::Type::Constants) != 0)
+            pHeaps[heapCount++] = mDescriptorHeaps[DescriptorHeap::Type::Constants]->GetHeap();
+
+        pCmd->SetDescriptorHeaps(heapCount, pHeaps);
     }
 
     void ResourceRegistry::Release(const ResourceHandle& handle)

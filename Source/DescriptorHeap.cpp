@@ -18,12 +18,15 @@ namespace ICR
         switch (mType)
         {
             case Texture2D:
+            case Constants:
+            case RawBuffer:
             {
                 heapDesc.Type   = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
                 heapDesc.Flags  = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
                 mDescriptorSize = gLogicalDevice->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
                 break;
             }
+
             case RenderTarget:
             {
                 heapDesc.Type   = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
@@ -103,6 +106,19 @@ namespace ICR
                 gLogicalDevice->CreateRenderTargetView(pResource, &infoRTV, GetAddressCPU(pResourceHandle->indexDescriptorRenderTarget));
                 break;
             }
+
+            case Constants:
+            {
+                D3D12_CONSTANT_BUFFER_VIEW_DESC infoCBV = {};
+                infoCBV.BufferLocation                  = pResource->GetGPUVirtualAddress();
+                infoCBV.SizeInBytes                     = static_cast<UINT>(resourceInfo.Width);
+
+                pResourceHandle->indexDescriptorConstants = Allocate();
+                gLogicalDevice->CreateConstantBufferView(&infoCBV, GetAddressCPU(pResourceHandle->indexDescriptorConstants));
+                break;
+            }
+
+            default: break;
         }
     }
 } // namespace ICR
