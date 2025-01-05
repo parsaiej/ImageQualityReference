@@ -45,6 +45,7 @@ find_package(Stb                           REQUIRED)
 
 add_executable(ImageQualityReference WIN32
     Source/Main.cpp
+    Source/State.cpp
     Source/Util.cpp
     Source/Interface.cpp
     Source/Precompiled.cpp
