@@ -311,7 +311,7 @@ namespace ICR
             for (int inputID : mInputIDs) // NOTE: Should never exceed 4.
             {
                 if (!resourceCache.contains(inputID))
-                    throw std::runtime_error("Input resource not found in cache.");
+                    continue;
 
                 // Generate a pointer to the resource descriptor.
                 CD3DX12_CPU_DESCRIPTOR_HANDLE resourceDescriptorHandle(mInputResourceDescriptorHeap->GetCPUDescriptorHandleForHeapStart(),
@@ -390,8 +390,8 @@ namespace ICR
     RenderInputShaderToy::RenderInputShaderToy() : mShaderID(256, '\0'), mInitialized(false), mUserRequestUnload(false)
     {
         // Initialize the shadertoy to a known-good one.
-        // "Raymarching - Primitives" https://www.shadertoy.com/view/Xds3zN
-        memcpy(mShaderID.data(), "4tByz3", 6);
+        // "fractal pyramid" https://www.shadertoy.com/view/tsXBzS
+        memcpy(mShaderID.data(), "tsXBzS", 6);
 
         // Initial async compile state.
         mAsyncCompileStatus.store(AsyncCompileShaderToyStatus::Idle);
@@ -807,10 +807,25 @@ namespace ICR
             constants.iFrame        = elapsedFrames;
             constants.iTimeDelta    = gDeltaTime;
             constants.iFrameRate    = 1.0f / gDeltaTime;
-            constants.iMouse.x      = ImGui::GetMousePos().x;
-            constants.iMouse.y      = ImGui::GetMousePos().y;
-            constants.iMouse.z      = 1; // ImGui::IsAnyMouseDown();
-            constants.iMouse.w      = ImGui::IsAnyMouseDown();
+
+            POINT mousePos;
+            if (GetCursorPos(&mousePos))
+            {
+                RECT windowRect;
+                GetWindowRect(gWindowNative, &windowRect);
+
+                int clientMouseX = mousePos.x - windowRect.left;
+                int clientMouseY = mousePos.y - windowRect.top;
+
+                constants.iMouse.x = clientMouseX - gViewport.TopLeftX;
+                constants.iMouse.y = clientMouseY - gViewport.TopLeftY;
+
+                // Flip
+                constants.iMouse.y = gViewport.Height - constants.iMouse.y;
+            }
+
+            constants.iMouse.z = ImGui::IsAnyMouseDown();
+            constants.iMouse.w = ImGui::IsAnyMouseDown();
         }
         memcpy(mpUBOData, &constants, sizeof(Constants));
 
