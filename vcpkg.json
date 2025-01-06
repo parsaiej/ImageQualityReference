@@ -1,7 +1,9 @@
 {
     "dependencies": [
-      { "name": "spdlog", "features": ["wchar"] },
-      { "name": "imgui", "features": ["dx12-binding", "glfw-binding"] },
+      { "name": "spdlog", "platform": "windows", "features": ["wchar"] },
+      { "name": "spdlog", "platform": "!windows" },
+      { "name": "imgui", "platform": "windows", "features": ["dx12-binding", "glfw-binding"] },
+      { "name": "imgui", "platform": "!windows", "features": ["vulkan-binding", "glfw-binding"] },
       "implot",
       "joltphysics",
       "magic-enum",
@@ -13,6 +15,6 @@
       "glslang",
       "nlohmann-json",
       "spirv-cross",
-      "d3d12-memory-allocator"
+      { "name": "d3d12-memory-allocator", "platform": "windows" }
     ]
   }

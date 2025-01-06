@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 # Fail immediately if the Agility SDK is not found.
-if (NOT DEFINED ENV{DIRECTX_AGILITY_SDK_DIR})
+if (WIN32 AND NOT DEFINED ENV{DIRECTX_AGILITY_SDK_DIR})
     message(FATAL_ERROR "Environment variable DIRECTX_AGILITY_SDK_DIR not found. Please install the latest DirectX Agility SDK and create an environment variable pointing to the root of it.")
 endif()
 
@@ -31,7 +31,6 @@ find_package(magic_enum             CONFIG REQUIRED)
 find_package(glfw3                  CONFIG REQUIRED)
 find_package(TBB                    CONFIG REQUIRED) 
 find_package(Taskflow               CONFIG REQUIRED) 
-find_package(d3d12-memory-allocator CONFIG REQUIRED)
 find_package(glslang                CONFIG REQUIRED)
 find_package(nlohmann_json          CONFIG REQUIRED)
 find_package(spirv_cross_core       CONFIG REQUIRED)
@@ -39,6 +38,10 @@ find_package(spirv_cross_glsl       CONFIG REQUIRED)
 find_package(spirv_cross_hlsl       CONFIG REQUIRED)
 find_package(CURL                          REQUIRED)
 find_package(Stb                           REQUIRED)
+
+if (WIN32)
+    find_package(d3d12-memory-allocator CONFIG REQUIRED)
+endif()
 
 # Executable
 # --------------------------------
@@ -95,7 +98,6 @@ target_link_libraries(ImageQualityReference PRIVATE
     Taskflow::Taskflow
     imgui::imgui
     implot::implot
-    unofficial::D3D12MemoryAllocator
     magic_enum::magic_enum
     glslang::glslang
     glslang::glslang-default-resource-limits
@@ -108,13 +110,22 @@ target_link_libraries(ImageQualityReference PRIVATE
     ${CMAKE_SOURCE_DIR}/External/spirv-to-dxil/lib/x64/${CMAKE_BUILD_TYPE}/libspirv_to_dxil.lib
 )
 
-configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/D3D12Core.dll      D3D12/D3D12Core.dll      COPYONLY)
-configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/DirectSR.dll       D3D12/DirectSR.dll       COPYONLY)
-configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/d3d12SDKLayers.dll D3D12/d3d12SDKLayers.dll COPYONLY)
+if (WIN32)
+    target_link_libraries(ImageQualityReference PRIVATE unofficial::D3D12MemoryAllocator)
+endif()
 
-configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/D3D12Core.pdb      D3D12/D3D12Core.pdb      COPYONLY)
-configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/DirectSR.pdb       D3D12/DirectSR.pdb       COPYONLY)
-configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/d3d12SDKLayers.pdb D3D12/d3d12SDKLayers.pdb COPYONLY)
+# Copy Agility SDK files.
+# --------------------------------
+
+if (WIN32)
+    configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/D3D12Core.dll      D3D12/D3D12Core.dll      COPYONLY)
+    configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/DirectSR.dll       D3D12/DirectSR.dll       COPYONLY)
+    configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/d3d12SDKLayers.dll D3D12/d3d12SDKLayers.dll COPYONLY)
+
+    configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/D3D12Core.pdb      D3D12/D3D12Core.pdb      COPYONLY)
+    configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/DirectSR.pdb       D3D12/DirectSR.pdb       COPYONLY)
+    configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/d3d12SDKLayers.pdb D3D12/d3d12SDKLayers.pdb COPYONLY)
+endif()
 
 # Copy shader bytecodes. 
 configure_file(${CMAKE_SOURCE_DIR}/Assets/Shaders/Compiled/FullscreenTriangle.vert.dxil Shaders/FullscreenTriangle.vert.dxil COPYONLY)
