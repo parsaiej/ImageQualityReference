@@ -1,7 +1,9 @@
 // clang-format off
-// Tell Windows to load the Agility SDK DLLs. 
-extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 715; }
-extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\"; }
+#ifdef WIN32
+    // Tell Windows to load the Agility SDK DLLs. 
+    extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 715; }
+    extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\"; }
+#endif
 // clang-format on
 
 #include <Util.h>
@@ -25,7 +27,7 @@ using namespace ICR;
 LRESULT CALLBACK WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 
 void CreateSwapChain();
-
+   
 void ReleaseSwapChain();
 
 // Enumerate a list of graphics adapters that support our usage of D3D12.
@@ -46,7 +48,11 @@ void SyncSettings();
 // Entry-point
 // -----------------------------
 
+#ifdef _WIN32
 _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
+#else 
+int main(int argc, char** argv)
+#endif
 {
     gInstance = hInstance;
 
@@ -167,7 +173,7 @@ void EnumerateSupportedAdapters()
     for (UINT adapterIndex = 0;
          SUCCEEDED(pDXGIFactory->EnumAdapterByGpuPreference(adapterIndex, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&pAdapter)));
          ++adapterIndex)
-    {
+    {  
         if (!SUCCEEDED(D3D12CreateDevice(pAdapter.Get(), D3D_FEATURE_LEVEL_12_0, _uuidof(ID3D12Device), nullptr)))
             continue;
 

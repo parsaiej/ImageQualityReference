@@ -79,6 +79,7 @@ add_definitions(-DHAVE_STRUCT_TIMESPEC)
 target_include_directories(ImageQualityReference BEFORE PRIVATE 
     Source/Include/
     External/spirv-to-dxil/include
+    External/NRI/Include
     $ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/include/
     $ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/include/d3dx12/
     ${Stb_INCLUDE_DIR}
@@ -86,6 +87,16 @@ target_include_directories(ImageQualityReference BEFORE PRIVATE
 
 # Link
 # --------------------------------
+
+if (WIN32)
+    set(PLATFORM         "x64")
+    set(PLATFORM_BIN_EXT "dll")
+    set(PLATFORM_LIB_EXT "lib")
+else()
+    set(PLATFORM         "arm64-osx")
+    set(PLATFORM_BIN_EXT "dylib")
+    set(PLATFORM_LIB_EXT "a")
+endif()
 
 target_link_libraries(ImageQualityReference PRIVATE 
     spdlog::spdlog_header_only
@@ -107,11 +118,19 @@ target_link_libraries(ImageQualityReference PRIVATE
     spirv-cross-core
     spirv-cross-glsl
     spirv-cross-hlsl
-    ${CMAKE_SOURCE_DIR}/External/spirv-to-dxil/lib/x64/${CMAKE_BUILD_TYPE}/libspirv_to_dxil.lib
+    
+    ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libNRI_NONE.${PLATFORM_LIB_EXT}
+    ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libNRI_Shared.${PLATFORM_LIB_EXT}
+    ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libNRI_Validation.${PLATFORM_LIB_EXT}
+    ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libNRI_VK.${PLATFORM_LIB_EXT}
 )
 
 if (WIN32)
-    target_link_libraries(ImageQualityReference PRIVATE unofficial::D3D12MemoryAllocator)
+    target_link_libraries(ImageQualityReference PRIVATE 
+        ${CMAKE_SOURCE_DIR}/External/spirv-to-dxil/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libspirv_to_dxil.${PLATFORM_BIN_EXT}
+        ${CMAKE_SOURCE_DIR}/External/spirv-to-dxil/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libspirv_to_dxil.${PLATFORM_BIN_EXT}
+        unofficial::D3D12MemoryAllocator
+    )
 endif()
 
 # Copy Agility SDK files.
