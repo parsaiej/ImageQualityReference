@@ -1,5 +1,6 @@
 #include "NRI/Extensions/NRIDeviceCreation.h"
 #include "NRI/NRIDescs.h"
+#include <GLFW/glfw3.h>
 #include <State.h>
 #include <Common.h>
 #include <spdlog/spdlog.h>
@@ -7,7 +8,10 @@
 using namespace ImageQualityReference;
 
 // Enumerate a list of graphics adapters that support our usage of D3D12.
-void EnumerateSupportedAdapters();
+void EnumerateAdapters();
+
+// Enumerate a list of displays and user-friendly info about them.
+void EnumerateDisplays();
 
 // Creates device instance based on user selection etc.
 void InitializeGraphicsRuntime();
@@ -32,7 +36,7 @@ int main(int argc, char** argv)
 #endif
 
     // Overlap adapter enumeration with window creation.
-    gAsyncTaskGroup.run([] { EnumerateSupportedAdapters(); });
+    gAsyncTaskGroup.run([] { EnumerateAdapters(); });
 
     // Create operating system window.
     // -----------------------------------------
@@ -74,7 +78,36 @@ int main(int argc, char** argv)
     return 0;
 }
 
-void EnumerateSupportedAdapters()
+void EnumerateDisplays()
+{
+    int           monitorCount;
+    GLFWmonitor** monitors = glfwGetMonitors(&monitorCount);
+
+    gDisplays.resize(monitorCount);
+    memcpy(gDisplays.data(), monitors, monitorCount);
+
+    std::cout << "Monitors available: " << monitorCount << "\n";
+    for (int i = 0; i < monitorCount; ++i)
+    {
+        GLFWmonitor* monitor     = monitors[i];
+        const char*  monitorName = glfwGetMonitorName(monitor);
+
+        // Get all supported video modes
+        int                modeCount;
+        const GLFWvidmode* modes = glfwGetVideoModes(monitor, &modeCount);
+
+        std::cout << "Monitor " << i + 1 << ": " << monitorName << "\n";
+        std::cout << "Supported video modes:\n";
+
+        for (int j = 0; j < modeCount; ++j)
+        {
+            const GLFWvidmode& mode = modes[j];
+            std::cout << "Resolution: " << mode.width << "x" << mode.height << ", Refresh Rate: " << mode.refreshRate << " Hz\n";
+        }
+    }
+}
+
+void EnumerateAdapters()
 {
     uint32_t adapterCount;
     NRI_ABORT_ON_FAILURE(nri::nriEnumerateAdapters(nullptr, adapterCount));
@@ -101,7 +134,7 @@ void InitializeGraphicsRuntime()
     nri::DeviceCreationDesc deviceCreationDesc = {};
     {
 #ifdef _DEBUG
-        bool enableValidation = true;
+        bool enableValidation = false;
 #else
         bool enableValidation = false;
 #endif
@@ -112,12 +145,13 @@ void InitializeGraphicsRuntime()
         deviceCreationDesc.graphicsAPI = nri::GraphicsAPI::VK;
 #endif
 
-        deviceCreationDesc.enableGraphicsAPIValidation       = enableValidation;
-        deviceCreationDesc.enableNRIValidation               = enableValidation;
-        deviceCreationDesc.enableD3D11CommandBufferEmulation = false;
-        deviceCreationDesc.adapterDesc                       = &gAdapterInfos[gAdapterIndex];
+        deviceCreationDesc.enableGraphicsAPIValidation = enableValidation;
+        deviceCreationDesc.enableNRIValidation         = enableValidation;
+        deviceCreationDesc.adapterDesc                 = &gAdapterInfos[gAdapterIndex];
     }
     NRI_ABORT_ON_FAILURE(nri::nriCreateDevice(deviceCreationDesc, gDevice));
+
+    EnumerateDisplays();
 
     nri::nriDestroyDevice(*gDevice);
 }

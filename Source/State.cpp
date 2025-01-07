@@ -18,6 +18,15 @@ namespace ImageQualityReference
     // The currently selected adapter by the user.
     int gAdapterIndex = 0;
 
+    // The list of detected displays / monitors in the system.
+    std::vector<GLFWmonitor*> gDisplays;
+
+    // List of human readable names for the displays.
+    std::vector<std::string> gDisplayNames;
+
+    // The currently selected display by the user.
+    int gDisplayIndex = 0;
+
     // Operating system window.
     GLFWwindow* gWindow = nullptr;
 
