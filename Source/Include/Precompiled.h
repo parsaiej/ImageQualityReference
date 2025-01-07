@@ -5,28 +5,36 @@
 #include <spdlog/sinks/ostream_sink.h> // For imgui.
 
 #ifdef _WIN32
-    // To resolve unresolved GUID symbols in DSR:
-    // https://discordapp.com/channels/590611987420020747/590965902564917258/1307840432872624228
-    #include <initguid.h>
+// To resolve unresolved GUID symbols in DSR:
+// https://discordapp.com/channels/590611987420020747/590965902564917258/1307840432872624228
+#include <initguid.h>
 
-    #include <d3dx12.h>
-    #include <d3dcompiler.h>
-    #include <dxgi1_6.h>
-    #include <dxgidebug.h>
-    #include <directsr.h>
-    #include <DirectXMath.h>
-    #include <D3D12MemAlloc.h>
+#include <d3dx12.h>
+#include <d3dcompiler.h>
+#include <dxgi1_6.h>
+#include <dxgidebug.h>
+#include <directsr.h>
+#include <DirectXMath.h>
+#include <D3D12MemAlloc.h>
 
-    #include <wrl.h>
-    using namespace Microsoft::WRL;
+#include <wrl.h>
+using namespace Microsoft::WRL;
 
-    #include <Windows.h>
+#include <Windows.h>
 #endif
 
 #include <curl/curl.h>
 
+// Using the eigen vector math library.
+#include <Eigen/Eigen>
+
 // NRI low-level graphics API abstraction.
 #include <NRI/NRI.h>
+#include <NRI/NRIDescs.h>
+#include <NRI/NRIMacro.h>
+#include <NRI/Extensions/NRIDeviceCreation.h>
+#include <NRI/Extensions/NRIHelper.h>
+#include <NRI/Extensions/NRISwapChain.h>
 
 #include <glslang/SPIRV/GlslangToSpv.h>
 #include <glslang/SPIRV/disassemble.h>
@@ -40,14 +48,14 @@
 #include <imgui_impl_glfw.h>
 
 #ifdef _WIN32
-    #include <imgui_impl_dx12.h>
+#include <imgui_impl_dx12.h>
 #endif
 
 #include <GLFW/glfw3.h>
 
 #ifdef _WIN32
-    #define GLFW_EXPOSE_NATIVE_WIN32
-    #include <GLFW/glfw3native.h>
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
 #endif
 
 #include <implot.h>
@@ -66,6 +74,5 @@
 #include <fstream>
 
 #include <spirv_to_dxil.h>
-#include <SplashImageBytes.h>
 
 #endif

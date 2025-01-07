@@ -36,6 +36,7 @@ find_package(nlohmann_json          CONFIG REQUIRED)
 find_package(spirv_cross_core       CONFIG REQUIRED)
 find_package(spirv_cross_glsl       CONFIG REQUIRED)
 find_package(spirv_cross_hlsl       CONFIG REQUIRED)
+find_package(Eigen3                 CONFIG REQUIRED)
 find_package(CURL                          REQUIRED)
 find_package(Stb                           REQUIRED)
 
@@ -49,13 +50,7 @@ endif()
 add_executable(ImageQualityReference WIN32
     Source/Main.cpp
     Source/State.cpp
-    Source/Util.cpp
-    Source/Interface.cpp
     Source/Precompiled.cpp
-    Source/RenderInputShaderToy.cpp
-    Source/Blitter.cpp
-    Source/ResourceRegistry.cpp
-    Source/DescriptorHeap.cpp
 )
 
 # Compile Options
@@ -101,8 +96,6 @@ endif()
 target_link_libraries(ImageQualityReference PRIVATE 
     spdlog::spdlog_header_only
     Jolt::Jolt
-    dxgi
-    d3d12
     glfw
     CURL::libcurl
     TBB::tbb
@@ -114,11 +107,14 @@ target_link_libraries(ImageQualityReference PRIVATE
     glslang::glslang-default-resource-limits
     glslang::SPIRV
     nlohmann_json::nlohmann_json
-    synchronization.lib
+    # synchronization.lib
     spirv-cross-core
     spirv-cross-glsl
     spirv-cross-hlsl
-    
+    Eigen3::Eigen
+
+    # Link NRI low-level graphics abstraction.
+    ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libNRI.${PLATFORM_LIB_EXT}
     ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libNRI_NONE.${PLATFORM_LIB_EXT}
     ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libNRI_Shared.${PLATFORM_LIB_EXT}
     ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libNRI_Validation.${PLATFORM_LIB_EXT}

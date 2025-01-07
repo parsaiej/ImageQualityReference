@@ -15,6 +15,7 @@
       "glslang",
       "nlohmann-json",
       "spirv-cross",
+      "eigen3",
       { "name": "d3d12-memory-allocator", "platform": "windows" }
     ]
   }

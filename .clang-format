@@ -11,18 +11,21 @@ AlignConsecutiveBitFields:
   AcrossEmptyLines: false
   AcrossComments: false
   AlignCompound: false
+  AlignFunctionPointers: false
   PadOperators: false
 AlignConsecutiveDeclarations:
   Enabled: true
   AcrossEmptyLines: false
   AcrossComments: false
   AlignCompound: true
+  AlignFunctionPointers: true
   PadOperators: true
 AlignConsecutiveMacros:
   Enabled: true
   AcrossEmptyLines: true
   AcrossComments: false
   AlignCompound: true
+  AlignFunctionPointers: true
   PadOperators: true
 AlignConsecutiveShortCaseStatements:
   Enabled: true
