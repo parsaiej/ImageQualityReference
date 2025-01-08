@@ -1,6 +1,4 @@
-#include "NRI/NRIDescs.h"
 #include <State.h>
-#include <imgui_impl_glfw.h>
 
 namespace ImageQualityReference
 {
@@ -26,6 +24,24 @@ namespace ImageQualityReference
 
     // The currently selected display by the user.
     int gDisplayIndex = 0;
+
+    // The list of resolutions for the currently selected display.
+    std::vector<Eigen::Vector2i> gResolutions;
+
+    // List of resolutions for display to user.
+    std::vector<std::string> gResolutionsStr;
+
+    // The currently selected resolution index.
+    int gResolutionIndex = 0;
+
+    // The list of refresh rates for the currently selected display.
+    std::vector<int> gRefreshRates;
+
+    // List of refresh rates for display to user.
+    std::vector<std::string> gRefreshRatesStr;
+
+    // The currently selected refresh rate.
+    int gRefreshRateIndex = 0;
 
     // Operating system window.
     GLFWwindow* gWindow = nullptr;

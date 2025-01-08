@@ -1,9 +1,5 @@
-#include "NRI/Extensions/NRIDeviceCreation.h"
-#include "NRI/NRIDescs.h"
-#include <GLFW/glfw3.h>
 #include <State.h>
 #include <Common.h>
-#include <spdlog/spdlog.h>
 
 using namespace ImageQualityReference;
 
@@ -12,6 +8,9 @@ void EnumerateAdapters();
 
 // Enumerate a list of displays and user-friendly info about them.
 void EnumerateDisplays();
+
+// Enumerate a list of the supported video modes for the current display.
+void EnumerateVideoModes();
 
 // Creates device instance based on user selection etc.
 void InitializeGraphicsRuntime();
@@ -81,29 +80,75 @@ int main(int argc, char** argv)
 void EnumerateDisplays()
 {
     int           monitorCount;
-    GLFWmonitor** monitors = glfwGetMonitors(&monitorCount);
+    GLFWmonitor** ppMonitors = glfwGetMonitors(&monitorCount);
 
-    gDisplays.resize(monitorCount);
-    memcpy(gDisplays.data(), monitors, monitorCount);
+    gDisplays.clear();
+    gDisplayNames.clear();
+    gDisplayIndex = 0;
 
-    std::cout << "Monitors available: " << monitorCount << "\n";
-    for (int i = 0; i < monitorCount; ++i)
+    for (int monitorIndex = 0; monitorIndex < monitorCount; ++monitorIndex)
     {
-        GLFWmonitor* monitor     = monitors[i];
-        const char*  monitorName = glfwGetMonitorName(monitor);
+        gDisplays.push_back(ppMonitors[monitorIndex]);
+        gDisplayNames.push_back(glfwGetMonitorName(ppMonitors[monitorIndex]));
+    }
+}
 
-        // Get all supported video modes
+void EnumerateVideoModes()
+{
+    std::vector<GLFWvidmode> videoModes;
+    {
         int                modeCount;
-        const GLFWvidmode* modes = glfwGetVideoModes(monitor, &modeCount);
+        const GLFWvidmode* ppModes = glfwGetVideoModes(gDisplays[gDisplayIndex], &modeCount);
 
-        std::cout << "Monitor " << i + 1 << ": " << monitorName << "\n";
-        std::cout << "Supported video modes:\n";
+        for (int modeIndex = 0; modeIndex < modeCount; modeIndex++)
+            videoModes.push_back(ppModes[modeIndex]);
+    }
 
-        for (int j = 0; j < modeCount; ++j)
-        {
-            const GLFWvidmode& mode = modes[j];
-            std::cout << "Resolution: " << mode.width << "x" << mode.height << ", Refresh Rate: " << mode.refreshRate << " Hz\n";
-        }
+    gResolutions.clear();
+    gResolutionsStr.clear();
+    gResolutionIndex = 0;
+
+    // Extract list of unique resolutions. (There may be multiples of the same resolution due
+    // to various refresh rates, dxgi formats, etc.).
+    // ----------------------------------------------------------
+    {
+        std::set<Eigen::Vector2i, Vector2iCmp> uniqueResolutions;
+
+        std::transform(videoModes.begin(),
+                       videoModes.end(),
+                       std::inserter(uniqueResolutions, uniqueResolutions.begin()),
+                       [&](const GLFWvidmode& mode) { return Eigen::Vector2i(mode.width, mode.height); });
+
+        gResolutions.resize(uniqueResolutions.size());
+        std::copy(uniqueResolutions.begin(), uniqueResolutions.end(), gResolutions.begin());
+
+        std::transform(gResolutions.begin(),
+                       gResolutions.end(),
+                       std::back_inserter(gResolutionsStr),
+                       [&](const Eigen::Vector2i& r) { return fmt::format("{} x {}", r.x(), r.y()); });
+    }
+
+    gRefreshRates.clear();
+    gRefreshRatesStr.clear();
+    gRefreshRateIndex = 0;
+
+    // Extract list of refresh rates.
+    // ----------------------------------------------------------
+    {
+        std::set<int> uniqueRefreshRates;
+
+        std::transform(videoModes.begin(),
+                       videoModes.end(),
+                       std::inserter(uniqueRefreshRates, uniqueRefreshRates.begin()),
+                       [&](const GLFWvidmode& mode) { return mode.refreshRate; });
+
+        gRefreshRates.resize(uniqueRefreshRates.size());
+        std::copy(uniqueRefreshRates.begin(), uniqueRefreshRates.end(), gRefreshRates.begin());
+
+        std::transform(gRefreshRates.begin(),
+                       gRefreshRates.end(),
+                       std::back_inserter(gRefreshRatesStr),
+                       [&](const int& r) { return fmt::format("{} Hz", r); });
     }
 }
 
@@ -152,6 +197,12 @@ void InitializeGraphicsRuntime()
     NRI_ABORT_ON_FAILURE(nri::nriCreateDevice(deviceCreationDesc, gDevice));
 
     EnumerateDisplays();
+
+    EnumerateVideoModes();
+
+    NRI_ABORT_ON_FAILURE(nri::nriGetInterface(*gDevice, NRI_INTERFACE(nri::CoreInterface), (nri::CoreInterface*)&gNRI));
+    NRI_ABORT_ON_FAILURE(nri::nriGetInterface(*gDevice, NRI_INTERFACE(nri::HelperInterface), (nri::HelperInterface*)&gNRI));
+    NRI_ABORT_ON_FAILURE(nri::nriGetInterface(*gDevice, NRI_INTERFACE(nri::SwapChainInterface), (nri::SwapChainInterface*)&gNRI));
 
     nri::nriDestroyDevice(*gDevice);
 }
