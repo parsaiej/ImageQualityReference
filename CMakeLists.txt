@@ -47,7 +47,13 @@ endif()
 # Executable
 # --------------------------------
 
-add_executable(ImageQualityReference WIN32
+if (APPLE)
+add_executable(ImageQualityReference)
+else()
+add_executable(ImageQualityReference WIN32)
+endif()
+
+target_sources(ImageQualityReference PRIVATE
     Source/Main.cpp
     Source/State.cpp
     Source/Precompiled.cpp
@@ -84,13 +90,15 @@ target_include_directories(ImageQualityReference BEFORE PRIVATE
 # --------------------------------
 
 if (WIN32)
-    set(PLATFORM         "x64")
+    set(PLATFORM         "x64-win")
     set(PLATFORM_BIN_EXT "dll")
     set(PLATFORM_LIB_EXT "lib")
+    set(NRI_LIB_PREFIX   "")
 else()
     set(PLATFORM         "arm64-osx")
     set(PLATFORM_BIN_EXT "dylib")
     set(PLATFORM_LIB_EXT "a")
+    set(NRI_LIB_PREFIX   "lib")
 endif()
 
 target_link_libraries(ImageQualityReference PRIVATE 
@@ -114,32 +122,26 @@ target_link_libraries(ImageQualityReference PRIVATE
     Eigen3::Eigen
 
     # Link NRI low-level graphics abstraction.
-    ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libNRI.${PLATFORM_LIB_EXT}
-    ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libNRI_NONE.${PLATFORM_LIB_EXT}
-    ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libNRI_Shared.${PLATFORM_LIB_EXT}
-    ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libNRI_Validation.${PLATFORM_LIB_EXT}
-    ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libNRI_VK.${PLATFORM_LIB_EXT}
+    ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/${NRI_LIB_PREFIX}NRI.${PLATFORM_LIB_EXT}
+    ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/${NRI_LIB_PREFIX}NRI_NONE.${PLATFORM_LIB_EXT}
+    ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/${NRI_LIB_PREFIX}NRI_Shared.${PLATFORM_LIB_EXT}
+    ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/${NRI_LIB_PREFIX}NRI_Validation.${PLATFORM_LIB_EXT}
+    ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/${NRI_LIB_PREFIX}NRI_VK.${PLATFORM_LIB_EXT}
 )
 
 if (WIN32)
     target_link_libraries(ImageQualityReference PRIVATE 
-        ${CMAKE_SOURCE_DIR}/External/spirv-to-dxil/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libspirv_to_dxil.${PLATFORM_BIN_EXT}
-        ${CMAKE_SOURCE_DIR}/External/spirv-to-dxil/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libspirv_to_dxil.${PLATFORM_BIN_EXT}
-        unofficial::D3D12MemoryAllocator
+        ${CMAKE_SOURCE_DIR}/External/spirv-to-dxil/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libspirv_to_dxil.${PLATFORM_LIB_EXT}
+        ${CMAKE_SOURCE_DIR}/External/spirv-to-dxil/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libspirv_to_dxil.${PLATFORM_LIB_EXT}
+
+        # Link the Windows-only NRI API support.
+        ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/${NRI_LIB_PREFIX}NRI_D3D11.${PLATFORM_LIB_EXT}
+        ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/${NRI_LIB_PREFIX}NRI_D3D12.${PLATFORM_LIB_EXT}
+
+        d3d11 d3d12 dxgi
+
+        C:\\Development\\NRI\\External\\nvapi\\amd64\\nvapi64.lib
     )
-endif()
-
-# Copy Agility SDK files.
-# --------------------------------
-
-if (WIN32)
-    configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/D3D12Core.dll      D3D12/D3D12Core.dll      COPYONLY)
-    configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/DirectSR.dll       D3D12/DirectSR.dll       COPYONLY)
-    configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/d3d12SDKLayers.dll D3D12/d3d12SDKLayers.dll COPYONLY)
-
-    configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/D3D12Core.pdb      D3D12/D3D12Core.pdb      COPYONLY)
-    configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/DirectSR.pdb       D3D12/DirectSR.pdb       COPYONLY)
-    configure_file($ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/bin/x64/d3d12SDKLayers.pdb D3D12/d3d12SDKLayers.pdb COPYONLY)
 endif()
 
 # Copy shader bytecodes. 

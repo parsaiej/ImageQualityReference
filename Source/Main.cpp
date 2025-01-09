@@ -15,7 +15,11 @@ void EnumerateVideoModes();
 // Creates device instance based on user selection etc.
 void InitializeGraphicsRuntime();
 
+#ifdef _WIN32
+_Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
+#else
 int main(int argc, char** argv)
+#endif
 {
     // Flush on critical events since we usually fatally crash the app right after.
     spdlog::flush_on(spdlog::level::critical);
