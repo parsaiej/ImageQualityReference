@@ -1,3 +1,6 @@
+#ifndef METAL_UTILITY_H
+#define METAL_UTILITY_H
+
 typedef struct GLFWwindow GLFWwindow;
 
 #ifdef __cplusplus
@@ -9,4 +12,6 @@ extern "C"
 
 #ifdef __cplusplus
 }
+#endif
+
 #endif

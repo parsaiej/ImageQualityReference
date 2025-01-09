@@ -1,3 +1,4 @@
+#include "NRI/NRIDescs.h"
 #include <State.h>
 #include <Common.h>
 #include <ResourceManager.h>
@@ -62,7 +63,7 @@ int main(int argc, char** argv)
         if (!gWindow)
             exit(1);
 
-            // Retrieve native handle to the operating system window.
+        // Retrieve native handle to the operating system window.
 #if _WIN32
         gNRIWindow.windows.hwnd = glfwGetWin32Window(gWindow);
 #elif __linux__
@@ -232,7 +233,7 @@ void InitializeGraphicsRuntime()
     nri::DeviceCreationDesc deviceCreationDesc = {};
     {
 #ifdef _DEBUG
-        bool enableValidation = false;
+        bool enableValidation = true;
 #else
         bool enableValidation = false;
 #endif

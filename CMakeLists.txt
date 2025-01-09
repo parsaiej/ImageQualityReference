@@ -27,7 +27,7 @@ if (APPLE)
     find_library(COCOA_LIBRARY Cocoa REQUIRED)
     find_library(QUARTZ_CORE QuartzCore REQUIRED)
     add_library(MetalUtility SHARED "External/MetalUtility/MetalUtility.m")
-    target_link_libraries(MetalUtility ${QUARTZ_CORE} ${COCOA_LIBRARY} glfw)
+    target_link_libraries(MetalUtility PRIVATE ${QUARTZ_CORE} ${COCOA_LIBRARY} glfw)
 endif ()
 
 # Packages
@@ -116,7 +116,6 @@ endif()
 target_link_libraries(ImageQualityReference PRIVATE 
     spdlog::spdlog_header_only
     Jolt::Jolt
-    glfw
     CURL::libcurl
     TBB::tbb
     Taskflow::Taskflow
@@ -142,6 +141,7 @@ target_link_libraries(ImageQualityReference PRIVATE
 )
 
 if (APPLE)
+    # NOTE: Inherit the glfw linkage through the metal utility for appl.
     target_link_libraries(ImageQualityReference PRIVATE MetalUtility)
 endif()
 
@@ -155,7 +155,7 @@ if (WIN32)
         ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/${NRI_LIB_PREFIX}NRI_D3D12.${PLATFORM_LIB_EXT}
 
         # Still need to link directly with the APIs due to NRI's API usage in headers.
-        d3d11 d3d12 dxgi
+        d3d11 d3d12 dxgi glfw
         
         # Need to link with the NVIDIA NSight marker API (used by NRI).
         ${CMAKE_SOURCE_DIR}/External/nvapi/Lib/x64-win/Release/nvapi64.lib
