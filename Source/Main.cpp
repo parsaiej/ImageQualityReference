@@ -224,7 +224,7 @@ void RecreateSwapChain()
 
     for (uint32_t swapChainImageIndex = 0; swapChainImageIndex < swapChainImageCount; swapChainImageIndex++)
     {
-        gSwapChainImageHandles[swapChainImageIndex] = gResourceManager->Create(ppSwapChainTextures[swapChainImageIndex]);
+        gSwapChainImageHandles.push_back(gResourceManager->Create(ppSwapChainTextures[swapChainImageIndex], ResourceView::RenderTarget));
     }
 }
 

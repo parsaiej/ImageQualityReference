@@ -1,19 +1,25 @@
 #ifndef RESOURCE_MANAGER_H
 #define RESOURCE_MANAGER_H
 
+#include "NRI/NRIDescs.h"
 namespace ImageQualityReference
 {
-    struct ResourceHandle
+    typedef uint64_t ResourceHandle;
+    typedef uint32_t ResourceViewBits;
+
+    enum ResourceView
     {
-        uint32_t indexResource               = UINT_MAX;
-        uint32_t indexDescriptorTexture2D    = UINT_MAX;
-        uint32_t indexDescriptorRenderTarget = UINT_MAX;
+        Texture2D    = 1 << 0,
+        RenderTarget = 1 << 1
     };
 
     struct Resource
     {
         nri::Buffer*  pBuffer  = nullptr;
         nri::Texture* pTexture = nullptr;
+
+        // Map of all views for the resource.
+        std::map<ResourceView, nri::Descriptor*> views;
     };
 
     class ResourceManager
@@ -26,16 +32,16 @@ namespace ImageQualityReference
         ResourceHandle Create(const nri::BufferDesc& bufferInfo);
 
         // Create texture with pre-existing resource.
-        ResourceHandle Create(nri::Texture* pTexture);
+        ResourceHandle Create(nri::Texture* pTexture, const ResourceViewBits& viewBits);
 
         void Release(const ResourceHandle& handle);
 
         inline Resource* Get(const ResourceHandle& handle)
         {
-            if (handle.indexResource == UINT_MAX)
+            if (handle == UINT_MAX)
                 throw std::runtime_error("Attempted to retrieve resource with an invalid handle.");
 
-            return &mResources[handle.indexResource];
+            return &mResources[handle];
         }
 
     private:

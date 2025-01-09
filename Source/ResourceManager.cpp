@@ -15,53 +15,71 @@ namespace ImageQualityReference
             mFreeIndices.push(i);
     }
 
+    void CreateViewsForResource(Resource* pResource, const ResourceViewBits& viewBits)
+    {
+        if ((viewBits & ResourceView::RenderTarget) != 0)
+        {
+            auto textureInfo = gNRI.GetTextureDesc(*pResource->pTexture);
+
+            // Create a render target view for the resource.
+            nri::Texture2DViewDesc renderTargetViewInfo = {};
+            {
+                renderTargetViewInfo.viewType = nri::Texture2DViewType::COLOR_ATTACHMENT;
+                renderTargetViewInfo.format   = textureInfo.format;
+                renderTargetViewInfo.mipNum   = 1;
+                renderTargetViewInfo.layerNum = 1;
+                renderTargetViewInfo.texture  = pResource->pTexture;
+            }
+            NRI_ABORT_ON_FAILURE(gNRI.CreateTexture2DView(renderTargetViewInfo, pResource->views[ResourceView::RenderTarget]));
+        }
+    }
+
     ResourceHandle ResourceManager::Create(const nri::TextureDesc& textureInfo)
     {
-        ResourceHandle handle;
-        handle.indexResource = Allocate();
+        ResourceHandle handle = Allocate();
 
-        NRI_ABORT_ON_FAILURE(gNRI.CreateTexture(*gDevice, textureInfo, mResources[handle.indexResource].pTexture));
+        NRI_ABORT_ON_FAILURE(gNRI.CreateTexture(*gDevice, textureInfo, mResources[handle].pTexture));
 
         nri::AllocateTextureDesc allocationInfo = {};
         {
             allocationInfo.desc           = textureInfo;
             allocationInfo.memoryLocation = nri::MemoryLocation::DEVICE;
         }
-        NRI_ABORT_ON_FAILURE(gNRI.AllocateTexture(*gDevice, allocationInfo, mResources[handle.indexResource].pTexture));
+        NRI_ABORT_ON_FAILURE(gNRI.AllocateTexture(*gDevice, allocationInfo, mResources[handle].pTexture));
 
         return handle;
     }
 
     ResourceHandle ResourceManager::Create(const nri::BufferDesc& bufferInfo)
     {
-        ResourceHandle handle;
-        handle.indexResource = Allocate();
+        ResourceHandle handle = Allocate();
 
-        NRI_ABORT_ON_FAILURE(gNRI.CreateBuffer(*gDevice, bufferInfo, mResources[handle.indexResource].pBuffer));
+        NRI_ABORT_ON_FAILURE(gNRI.CreateBuffer(*gDevice, bufferInfo, mResources[handle].pBuffer));
 
         nri::AllocateBufferDesc allocationInfo = {};
         {
             allocationInfo.desc           = bufferInfo;
             allocationInfo.memoryLocation = nri::MemoryLocation::DEVICE;
         }
-        NRI_ABORT_ON_FAILURE(gNRI.AllocateBuffer(*gDevice, allocationInfo, mResources[handle.indexResource].pBuffer));
+        NRI_ABORT_ON_FAILURE(gNRI.AllocateBuffer(*gDevice, allocationInfo, mResources[handle].pBuffer));
 
         return handle;
     }
 
-    ResourceHandle ResourceManager::Create(nri::Texture* pTexture)
+    ResourceHandle ResourceManager::Create(nri::Texture* pTexture, const ResourceViewBits& viewBits)
     {
-        ResourceHandle handle;
-        handle.indexResource = Allocate();
+        ResourceHandle handle = Allocate();
 
-        mResources[handle.indexResource].pTexture = pTexture;
+        mResources[handle].pTexture = pTexture;
+
+        CreateViewsForResource(&mResources[handle], viewBits);
 
         return handle;
     }
 
     void ResourceManager::Release(const ResourceHandle& handle)
     {
-        if (handle.indexResource == UINT_MAX)
+        if (handle == UINT_MAX)
             throw std::runtime_error("Attempted to release resource with an invalid handle.");
 
         auto* pResource = Get(handle);
@@ -72,7 +90,7 @@ namespace ImageQualityReference
         if (pResource->pTexture)
             gNRI.DestroyTexture(*pResource->pTexture);
 
-        mFreeIndices.push(handle.indexResource);
+        mFreeIndices.push(handle);
     }
 
     uint32_t ResourceManager::Allocate()

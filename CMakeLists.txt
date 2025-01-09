@@ -67,7 +67,6 @@ target_sources(ImageQualityReference PRIVATE
     Source/Main.cpp
     Source/State.cpp
     Source/ResourceManager.cpp
-    Source/DescriptorArray.cpp
     Source/Precompiled.cpp
 )
 

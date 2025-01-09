@@ -1,5 +1,6 @@
 #include <State.h>
 #include <ResourceManager.h>
+#include <_types/_uint32_t.h>
 
 namespace ImageQualityReference
 {
@@ -9,11 +10,11 @@ namespace ImageQualityReference
     nri::Device* gDevice = nullptr;
 
     // Graphics objects.
-    nri::CommandQueue*          gCommandQueue     = nullptr;
-    nri::CommandAllocator*      gCommandAllocator = nullptr;
-    nri::SwapChain*             gSwapChain        = nullptr;
-    std::vector<ResourceHandle> gSwapChainImageHandles;
-    nri::TextureDesc            gSwapChainImageInfo = {};
+    nri::CommandQueue*     gCommandQueue     = nullptr;
+    nri::CommandAllocator* gCommandAllocator = nullptr;
+    nri::SwapChain*        gSwapChain        = nullptr;
+    std::vector<uint32_t>  gSwapChainImageHandles;
+    nri::TextureDesc       gSwapChainImageInfo = {};
 
     // List of adapters in the system.
     std::vector<nri::AdapterDesc> gAdapterInfos;

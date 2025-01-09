@@ -3,7 +3,6 @@
 
 namespace ImageQualityReference
 {
-    struct ResourceHandle;
     class ResourceManager;
 
     // clang-format off
@@ -21,7 +20,7 @@ struct NRIInterface
     extern nri::CommandQueue*                 gCommandQueue;
     extern nri::CommandAllocator*             gCommandAllocator;
     extern nri::SwapChain*                    gSwapChain;
-    extern std::vector<ResourceHandle>        gSwapChainImageHandles;
+    extern std::vector<uint32_t>              gSwapChainImageHandles;
     extern nri::TextureDesc                   gSwapChainImageInfo;
     extern std::vector<nri::AdapterDesc>      gAdapterInfos;
     extern std::vector<std::string>           gAdapterNames;
