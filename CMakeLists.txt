@@ -138,9 +138,11 @@ if (WIN32)
         ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/${NRI_LIB_PREFIX}NRI_D3D11.${PLATFORM_LIB_EXT}
         ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/${NRI_LIB_PREFIX}NRI_D3D12.${PLATFORM_LIB_EXT}
 
+        # Still need to link directly with the APIs due to NRI's API usage in headers.
         d3d11 d3d12 dxgi
-
-        C:\\Development\\NRI\\External\\nvapi\\amd64\\nvapi64.lib
+        
+        # Need to link with the NVIDIA NSight marker API (used by NRI).
+        ${CMAKE_SOURCE_DIR}/External/nvapi/Lib/x64-win/Release/nvapi64.lib
     )
 endif()
 
