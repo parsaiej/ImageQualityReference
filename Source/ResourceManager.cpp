@@ -32,6 +32,11 @@ namespace ImageQualityReference
             }
             NRI_ABORT_ON_FAILURE(gNRI.CreateTexture2DView(renderTargetViewInfo, pResource->views[ResourceView::RenderTarget]));
         }
+
+        if ((viewBits & ResourceView::Texture2D) != 0)
+        {
+            // TODO
+        }
     }
 
     ResourceHandle ResourceManager::Create(const nri::TextureDesc& textureInfo)

@@ -23,6 +23,9 @@ void InitializeGraphicsRuntime();
 // Frees all graphics resources.
 void ReleaseGraphicsRuntime();
 
+// Main rendering routine.
+void Render();
+
 #ifdef _WIN32
 _Use_decl_annotations_ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
 #else
@@ -88,6 +91,8 @@ int main(int argc, char** argv)
     while (!glfwWindowShouldClose(gWindow))
     {
         glfwPollEvents();
+
+        Render();
     }
 
     ReleaseGraphicsRuntime();
@@ -228,6 +233,8 @@ void RecreateSwapChain()
     }
 }
 
+static nri::CommandBuffer* pCommandBuffer;
+
 void InitializeGraphicsRuntime()
 {
     nri::DeviceCreationDesc deviceCreationDesc = {};
@@ -260,6 +267,11 @@ void InitializeGraphicsRuntime()
 
     NRI_ABORT_ON_FAILURE(gNRI.GetCommandQueue(*gDevice, nri::CommandQueueType::GRAPHICS, gCommandQueue));
 
+    NRI_ABORT_ON_FAILURE(gNRI.CreateCommandAllocator(*gCommandQueue, gCommandAllocator));
+
+    // Create temporary single-frame command buffer.
+    NRI_ABORT_ON_FAILURE(gNRI.CreateCommandBuffer(*gCommandAllocator, pCommandBuffer));
+
     gResourceManager = std::make_unique<ResourceManager>();
 
     RecreateSwapChain();
@@ -270,4 +282,63 @@ void ReleaseGraphicsRuntime()
     gNRI.WaitForIdle(*gCommandQueue);
     gNRI.DestroySwapChain(*gSwapChain);
     nri::nriDestroyDevice(*gDevice);
+}
+
+void Render()
+{
+    // For now just halt the thread until GPU is done before moving to next frame.
+    gNRI.WaitForIdle(*gCommandQueue);
+
+    gNRI.ResetCommandAllocator(*gCommandAllocator);
+
+    gNRI.BeginCommandBuffer(*pCommandBuffer, nullptr);
+
+    const uint32_t currentSwapChainImageIndex = gNRI.AcquireNextSwapChainTexture(*gSwapChain);
+
+    auto* pCurrentSwapChainImageResource = gResourceManager->Get(gSwapChainImageHandles[currentSwapChainImageIndex]);
+
+    nri::TextureBarrierDesc textureBarrierDescs = {};
+    textureBarrierDescs.texture                 = pCurrentSwapChainImageResource->pTexture;
+    textureBarrierDescs.after                   = { nri::AccessBits::COLOR_ATTACHMENT, nri::Layout::COLOR_ATTACHMENT };
+    textureBarrierDescs.layerNum                = 1;
+    textureBarrierDescs.mipNum                  = 1;
+
+    nri::BarrierGroupDesc barrierGroupDesc = {};
+    barrierGroupDesc.textureNum            = 1;
+    barrierGroupDesc.textures              = &textureBarrierDescs;
+
+    gNRI.CmdBarrier(*pCommandBuffer, barrierGroupDesc);
+
+    nri::AttachmentsDesc attachmentInfo = {};
+    {
+        attachmentInfo.colorNum = 1u;
+        attachmentInfo.colors   = &pCurrentSwapChainImageResource->views[ResourceView::RenderTarget];
+    }
+    gNRI.CmdBeginRendering(*pCommandBuffer, attachmentInfo);
+
+    nri::ClearDesc clearDescs[2] = {};
+    clearDescs[0].planes         = nri::PlaneBits::COLOR;
+    clearDescs[0].value.color.f  = { 0.0f, 0.63f, 1.0f };
+
+    gNRI.CmdClearAttachments(*pCommandBuffer, clearDescs, 1, nullptr, 0);
+
+    gNRI.CmdEndRendering(*pCommandBuffer);
+
+    textureBarrierDescs.before = textureBarrierDescs.after;
+    textureBarrierDescs.after  = { nri::AccessBits::UNKNOWN, nri::Layout::PRESENT };
+
+    gNRI.CmdBarrier(*pCommandBuffer, barrierGroupDesc);
+
+    gNRI.EndCommandBuffer(*pCommandBuffer);
+
+    nri::QueueSubmitDesc submitInfo = {};
+    {
+        submitInfo.commandBufferNum = 1u;
+        submitInfo.commandBuffers   = &pCommandBuffer;
+    }
+    gNRI.QueueSubmit(*gCommandQueue, submitInfo);
+
+    (gNRI.QueuePresent(*gSwapChain));
+
+    // NRI_ABORT_ON_FAILURE(gNRI.WaitForPresent(*gSwapChain));
 }
