@@ -1,8 +1,6 @@
-#include "NRI/Extensions/NRISwapChain.h"
-#include "NRI/NRI.h"
-#include "NRI/NRIDescs.h"
 #include <State.h>
 #include <Common.h>
+#include <ResourceManager.h>
 
 using namespace ImageQualityReference;
 
@@ -64,12 +62,12 @@ int main(int argc, char** argv)
         if (!gWindow)
             exit(1);
 
-        // Retrieve native handle to the operating system window.
+            // Retrieve native handle to the operating system window.
 #if _WIN32
-        gNRIWindow.windows.hwnd = glfwGetWin32Window(m_Window);
+        gNRIWindow.windows.hwnd = glfwGetWin32Window(gWindow);
 #elif __linux__
         gNRIWindow.x11.dpy    = glfwGetX11Display();
-        gNRIWindow.x11.window = glfwGetX11Window(m_Window);
+        gNRIWindow.x11.window = glfwGetX11Window(gWindow);
 #elif __APPLE__
         gNRIWindow.metal.caMetalLayer = GetMetalLayer(gWindow);
 #endif
@@ -201,6 +199,11 @@ void EnumerateAdapters()
 
 void RecreateSwapChain()
 {
+    if (gSwapChain != nullptr)
+    {
+        gNRI.DestroySwapChain(*gSwapChain);
+    }
+
     nri::SwapChainDesc swapChainInfo = {};
     {
         swapChainInfo.window               = gNRIWindow;
@@ -212,6 +215,16 @@ void RecreateSwapChain()
         swapChainInfo.textureNum           = 2;
     }
     NRI_ABORT_ON_FAILURE(gNRI.CreateSwapChain(*gDevice, swapChainInfo, gSwapChain));
+
+    uint32_t swapChainImageCount;
+    auto     ppSwapChainTextures = gNRI.GetSwapChainTextures(*gSwapChain, swapChainImageCount);
+
+    gSwapChainImageInfo = gNRI.GetTextureDesc(*ppSwapChainTextures[0]);
+
+    for (uint32_t swapChainImageIndex = 0; swapChainImageIndex < swapChainImageCount; swapChainImageIndex++)
+    {
+        gSwapChainImageHandles[swapChainImageIndex] = gResourceManager->Create(ppSwapChainTextures[swapChainImageIndex]);
+    }
 }
 
 void InitializeGraphicsRuntime()
@@ -246,12 +259,14 @@ void InitializeGraphicsRuntime()
 
     NRI_ABORT_ON_FAILURE(gNRI.GetCommandQueue(*gDevice, nri::CommandQueueType::GRAPHICS, gCommandQueue));
 
+    gResourceManager = std::make_unique<ResourceManager>();
+
     RecreateSwapChain();
 }
 
 void ReleaseGraphicsRuntime()
 {
+    gNRI.WaitForIdle(*gCommandQueue);
     gNRI.DestroySwapChain(*gSwapChain);
-
     nri::nriDestroyDevice(*gDevice);
 }

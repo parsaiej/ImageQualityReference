@@ -1,6 +1,5 @@
-#include "NRI/Extensions/NRISwapChain.h"
-#include "NRI/NRIDescs.h"
 #include <State.h>
+#include <ResourceManager.h>
 
 namespace ImageQualityReference
 {
@@ -10,9 +9,11 @@ namespace ImageQualityReference
     nri::Device* gDevice = nullptr;
 
     // Graphics objects.
-    nri::CommandQueue*     gCommandQueue     = nullptr;
-    nri::CommandAllocator* gCommandAllocator = nullptr;
-    nri::SwapChain*        gSwapChain        = nullptr;
+    nri::CommandQueue*          gCommandQueue     = nullptr;
+    nri::CommandAllocator*      gCommandAllocator = nullptr;
+    nri::SwapChain*             gSwapChain        = nullptr;
+    std::vector<ResourceHandle> gSwapChainImageHandles;
+    nri::TextureDesc            gSwapChainImageInfo = {};
 
     // List of adapters in the system.
     std::vector<nri::AdapterDesc> gAdapterInfos;
@@ -61,5 +62,8 @@ namespace ImageQualityReference
 
     // For dispatching one-off jobs.
     tbb::task_group gAsyncTaskGroup;
+
+    // Main utility for GPU resource allocation + descriptors.
+    std::unique_ptr<ResourceManager> gResourceManager;
 
 } // namespace ImageQualityReference

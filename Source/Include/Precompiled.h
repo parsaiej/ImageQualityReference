@@ -34,6 +34,7 @@ using namespace Microsoft::WRL;
 #include <NRI/Extensions/NRIDeviceCreation.h>
 #include <NRI/Extensions/NRIHelper.h>
 #include <NRI/Extensions/NRISwapChain.h>
+#include <NRI/Extensions/NRIResourceAllocator.h>
 
 #include <glslang/SPIRV/GlslangToSpv.h>
 #include <glslang/SPIRV/disassemble.h>
