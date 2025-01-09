@@ -1,3 +1,5 @@
+#include "NRI/Extensions/NRISwapChain.h"
+#include "NRI/NRIDescs.h"
 #include <State.h>
 
 namespace ImageQualityReference
@@ -6,6 +8,11 @@ namespace ImageQualityReference
 
     // The current graphics device.
     nri::Device* gDevice = nullptr;
+
+    // Graphics objects.
+    nri::CommandQueue*     gCommandQueue     = nullptr;
+    nri::CommandAllocator* gCommandAllocator = nullptr;
+    nri::SwapChain*        gSwapChain        = nullptr;
 
     // List of adapters in the system.
     std::vector<nri::AdapterDesc> gAdapterInfos;
@@ -45,6 +52,9 @@ namespace ImageQualityReference
 
     // Operating system window.
     GLFWwindow* gWindow = nullptr;
+
+    // Need a separate window concept for swap chain creation.
+    nri::Window gNRIWindow = {};
 
     // Block of memory for log text.
     std::shared_ptr<std::stringstream> gLoggerMemory;

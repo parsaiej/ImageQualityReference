@@ -1,6 +1,8 @@
 #ifndef STATE_H
 #define STATE_H
 
+#include "NRI/Extensions/NRISwapChain.h"
+#include "NRI/NRIDescs.h"
 namespace ImageQualityReference
 {
     // clang-format off
@@ -12,7 +14,11 @@ struct NRIInterface
 
     extern GLFWwindow*                        gWindow;
     extern NRIInterface                       gNRI;
+    extern nri::Window                        gNRIWindow;
     extern nri::Device*                       gDevice;
+    extern nri::CommandQueue*                 gCommandQueue;
+    extern nri::CommandAllocator*             gCommandAllocator;
+    extern nri::SwapChain*                    gSwapChain;
     extern std::vector<nri::AdapterDesc>      gAdapterInfos;
     extern std::vector<std::string>           gAdapterNames;
     extern int                                gAdapterIndex;
@@ -25,7 +31,6 @@ struct NRIInterface
     extern std::vector<int>                   gRefreshRates;
     extern std::vector<std::string>           gRefreshRatesStr;
     extern int                                gRefreshRateIndex;
-    extern int                                gVideoModeIndex;
     extern std::shared_ptr<std::stringstream> gLoggerMemory;
     extern tbb::task_group                    gAsyncTaskGroup;
 

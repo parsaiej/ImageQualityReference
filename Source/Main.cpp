@@ -1,3 +1,6 @@
+#include "NRI/Extensions/NRISwapChain.h"
+#include "NRI/NRI.h"
+#include "NRI/NRIDescs.h"
 #include <State.h>
 #include <Common.h>
 
@@ -12,8 +15,14 @@ void EnumerateDisplays();
 // Enumerate a list of the supported video modes for the current display.
 void EnumerateVideoModes();
 
+//
+void RecreateSwapChain();
+
 // Creates device instance based on user selection etc.
 void InitializeGraphicsRuntime();
+
+// Frees all graphics resources.
+void ReleaseGraphicsRuntime();
 
 int main(int argc, char** argv)
 {
@@ -50,6 +59,16 @@ int main(int argc, char** argv)
 
         if (!gWindow)
             exit(1);
+
+        // Retrieve native handle to the operating system window.
+#if _WIN32
+        gNRIWindow.windows.hwnd = glfwGetWin32Window(m_Window);
+#elif __linux__
+        gNRIWindow.x11.dpy    = glfwGetX11Display();
+        gNRIWindow.x11.window = glfwGetX11Window(m_Window);
+#elif __APPLE__
+        gNRIWindow.metal.caMetalLayer = GetMetalLayer(gWindow);
+#endif
     }
 
     gAsyncTaskGroup.wait();
@@ -67,6 +86,8 @@ int main(int argc, char** argv)
     {
         glfwPollEvents();
     }
+
+    ReleaseGraphicsRuntime();
 
     glslang::FinalizeProcess();
 
@@ -174,6 +195,21 @@ void EnumerateAdapters()
     exit(1);
 }
 
+void RecreateSwapChain()
+{
+    nri::SwapChainDesc swapChainInfo = {};
+    {
+        swapChainInfo.window               = gNRIWindow;
+        swapChainInfo.commandQueue         = gCommandQueue;
+        swapChainInfo.format               = nri::SwapChainFormat::BT709_G22_8BIT;
+        swapChainInfo.verticalSyncInterval = 1;
+        swapChainInfo.width                = 800;
+        swapChainInfo.height               = 600;
+        swapChainInfo.textureNum           = 2;
+    }
+    NRI_ABORT_ON_FAILURE(gNRI.CreateSwapChain(*gDevice, swapChainInfo, gSwapChain));
+}
+
 void InitializeGraphicsRuntime()
 {
     nri::DeviceCreationDesc deviceCreationDesc = {};
@@ -203,6 +239,15 @@ void InitializeGraphicsRuntime()
     NRI_ABORT_ON_FAILURE(nri::nriGetInterface(*gDevice, NRI_INTERFACE(nri::CoreInterface), (nri::CoreInterface*)&gNRI));
     NRI_ABORT_ON_FAILURE(nri::nriGetInterface(*gDevice, NRI_INTERFACE(nri::HelperInterface), (nri::HelperInterface*)&gNRI));
     NRI_ABORT_ON_FAILURE(nri::nriGetInterface(*gDevice, NRI_INTERFACE(nri::SwapChainInterface), (nri::SwapChainInterface*)&gNRI));
+
+    NRI_ABORT_ON_FAILURE(gNRI.GetCommandQueue(*gDevice, nri::CommandQueueType::GRAPHICS, gCommandQueue));
+
+    RecreateSwapChain();
+}
+
+void ReleaseGraphicsRuntime()
+{
+    gNRI.DestroySwapChain(*gSwapChain);
 
     nri::nriDestroyDevice(*gDevice);
 }

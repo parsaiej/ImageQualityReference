@@ -20,6 +20,16 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Metal Native Window Utility
+# --------------------------------
+
+if (APPLE)
+    find_library(COCOA_LIBRARY Cocoa REQUIRED)
+    find_library(QUARTZ_CORE QuartzCore REQUIRED)
+    add_library(MetalUtility SHARED "External/MetalUtility/MetalUtility.m")
+    target_link_libraries(MetalUtility ${QUARTZ_CORE} ${COCOA_LIBRARY} glfw)
+endif ()
+
 # Packages
 # --------------------------------
 
@@ -120,6 +130,10 @@ target_link_libraries(ImageQualityReference PRIVATE
     ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libNRI_Validation.${PLATFORM_LIB_EXT}
     ${CMAKE_SOURCE_DIR}/External/NRI/lib/${PLATFORM}/${CMAKE_BUILD_TYPE}/libNRI_VK.${PLATFORM_LIB_EXT}
 )
+
+if (APPLE)
+    target_link_libraries(ImageQualityReference PRIVATE MetalUtility)
+endif()
 
 if (WIN32)
     target_link_libraries(ImageQualityReference PRIVATE 

@@ -31,7 +31,6 @@ using namespace Microsoft::WRL;
 // NRI low-level graphics API abstraction.
 #include <NRI/NRI.h>
 #include <NRI/NRIDescs.h>
-#include <NRI/NRIMacro.h>
 #include <NRI/Extensions/NRIDeviceCreation.h>
 #include <NRI/Extensions/NRIHelper.h>
 #include <NRI/Extensions/NRISwapChain.h>
@@ -56,6 +55,10 @@ using namespace Microsoft::WRL;
 #ifdef _WIN32
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
+#endif
+
+#ifdef __APPLE__
+#include "../../External/MetalUtility/MetalUtility.h"
 #endif
 
 #include <implot.h>
