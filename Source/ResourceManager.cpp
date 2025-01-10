@@ -1,4 +1,5 @@
 
+#include "NRI/NRIDescs.h"
 #include <ResourceManager.h>
 #include <State.h>
 #include <Common.h>
@@ -15,13 +16,32 @@ namespace ImageQualityReference
             mFreeIndices.push(i);
     }
 
+    void ResourceManager::ReleaseAll()
+    {
+        for (auto& resource : mResources)
+        {
+            for (auto& resourceViews : resource.views)
+                gNRI.DestroyDescriptor(*resourceViews.second);
+
+            // Exit early for resources that were made externally and only had their
+            // views created here.
+            if (resource.externallyManangedMemory)
+                continue;
+
+            if (resource.pBuffer)
+                gNRI.DestroyBuffer(*resource.pBuffer);
+
+            if (resource.pTexture)
+                gNRI.DestroyTexture(*resource.pTexture);
+        }
+    }
+
     void CreateViewsForResource(Resource* pResource, const ResourceViewBits& viewBits)
     {
         if ((viewBits & ResourceView::RenderTarget) != 0)
         {
             auto textureInfo = gNRI.GetTextureDesc(*pResource->pTexture);
 
-            // Create a render target view for the resource.
             nri::Texture2DViewDesc renderTargetViewInfo = {};
             {
                 renderTargetViewInfo.viewType = nri::Texture2DViewType::COLOR_ATTACHMENT;
@@ -33,9 +53,19 @@ namespace ImageQualityReference
             NRI_ABORT_ON_FAILURE(gNRI.CreateTexture2DView(renderTargetViewInfo, pResource->views[ResourceView::RenderTarget]));
         }
 
-        if ((viewBits & ResourceView::Texture2D) != 0)
+        if ((viewBits & ResourceView::SampledTexture2D) != 0)
         {
-            // TODO
+            auto textureInfo = gNRI.GetTextureDesc(*pResource->pTexture);
+
+            nri::Texture2DViewDesc sampledTexture2DViewInfo = {};
+            {
+                sampledTexture2DViewInfo.viewType = nri::Texture2DViewType::SHADER_RESOURCE_STORAGE_2D;
+                sampledTexture2DViewInfo.format   = textureInfo.format;
+                sampledTexture2DViewInfo.mipNum   = 1;
+                sampledTexture2DViewInfo.layerNum = 1;
+                sampledTexture2DViewInfo.texture  = pResource->pTexture;
+            }
+            NRI_ABORT_ON_FAILURE(gNRI.CreateTexture2DView(sampledTexture2DViewInfo, pResource->views[ResourceView::SampledTexture2D]));
         }
     }
 
@@ -75,7 +105,8 @@ namespace ImageQualityReference
     {
         ResourceHandle handle = Allocate();
 
-        mResources[handle].pTexture = pTexture;
+        mResources[handle].pTexture                 = pTexture;
+        mResources[handle].externallyManangedMemory = true;
 
         CreateViewsForResource(&mResources[handle], viewBits);
 

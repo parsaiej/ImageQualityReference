@@ -14,6 +14,9 @@ void EnumerateDisplays();
 // Enumerate a list of the supported video modes for the current display.
 void EnumerateVideoModes();
 
+// Separate release routine for swapchains since it may happen at app shutdown or window resize.
+void ReleaseSwapChain();
+
 //
 void RecreateSwapChain();
 
@@ -203,12 +206,18 @@ void EnumerateAdapters()
     exit(1);
 }
 
+void ReleaseSwapChain()
+{
+    // We assume the full swap chain is valid if the main graphics object is.
+    if (!gSwapChain)
+        return;
+
+    gNRI.DestroySwapChain(*gSwapChain);
+}
+
 void RecreateSwapChain()
 {
-    if (gSwapChain != nullptr)
-    {
-        gNRI.DestroySwapChain(*gSwapChain);
-    }
+    ReleaseSwapChain();
 
     nri::SwapChainDesc swapChainInfo = {};
     {
@@ -279,8 +288,15 @@ void InitializeGraphicsRuntime()
 
 void ReleaseGraphicsRuntime()
 {
-    gNRI.WaitForIdle(*gCommandQueue);
-    gNRI.DestroySwapChain(*gSwapChain);
+    NRI_ABORT_ON_FAILURE(gNRI.WaitForIdle(*gCommandQueue));
+
+    gResourceManager->ReleaseAll();
+
+    ReleaseSwapChain();
+
+    gNRI.DestroyCommandBuffer(*pCommandBuffer);
+    gNRI.DestroyCommandAllocator(*gCommandAllocator);
+
     nri::nriDestroyDevice(*gDevice);
 }
 

@@ -1,7 +1,6 @@
 #ifndef RESOURCE_MANAGER_H
 #define RESOURCE_MANAGER_H
 
-#include "NRI/NRIDescs.h"
 namespace ImageQualityReference
 {
     typedef uint64_t ResourceHandle;
@@ -9,14 +8,19 @@ namespace ImageQualityReference
 
     enum ResourceView
     {
-        Texture2D    = 1 << 0,
-        RenderTarget = 1 << 1
+        SampledTexture2D = 1 << 0,
+        RenderTarget     = 1 << 1
     };
 
     struct Resource
     {
         nri::Buffer*  pBuffer  = nullptr;
         nri::Texture* pTexture = nullptr;
+
+        // For resources e.g. swap-chain backbuffer images
+        // the memory creation / destruction is managed elsewhere
+        // so we need to flag to safeguard against double free.
+        bool externallyManangedMemory;
 
         // Map of all views for the resource.
         std::map<ResourceView, nri::Descriptor*> views;
@@ -31,8 +35,9 @@ namespace ImageQualityReference
         ResourceHandle Create(const nri::TextureDesc& textureInfo);
         ResourceHandle Create(const nri::BufferDesc& bufferInfo);
 
-        // Create texture with pre-existing resource.
         ResourceHandle Create(nri::Texture* pTexture, const ResourceViewBits& viewBits);
+
+        void ReleaseAll();
 
         void Release(const ResourceHandle& handle);
 
