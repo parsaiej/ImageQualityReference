@@ -46,22 +46,31 @@ void ImageQualityReference::CreateInterface()
 
     auto ImInitializeVulkan = []()
     {
-        auto vkInstance       = *reinterpret_cast<VkInstance*>(gNRI.GetInstanceVK(*gDevice));
-        auto vkPhysicalDevice = *reinterpret_cast<VkPhysicalDevice*>(gNRI.GetPhysicalDeviceVK(*gDevice));
-        auto vkDevice         = *reinterpret_cast<VkDevice*>(gNRI.GetDeviceVK(*gDevice));
+        auto vkInstance       = static_cast<VkInstance>(gNRI.GetInstanceVK(*gDevice));
+        auto vkPhysicalDevice = static_cast<VkPhysicalDevice>(gNRI.GetPhysicalDeviceVK(*gDevice));
+        auto vkDevice         = static_cast<VkDevice>(gNRI.GetDeviceVK(*gDevice));
 
-        VkDescriptorPoolCreateInfo interfaceDescriptorPoolInfo = {};
+        VkDescriptorPoolSize interfaceDescriptorPoolSizes[] = {
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 },
+        };
+
+        VkDescriptorPoolCreateInfo interfaceDescriptorPoolInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
         {
+            interfaceDescriptorPoolInfo.maxSets       = 2;
+            interfaceDescriptorPoolInfo.poolSizeCount = 1;
+            interfaceDescriptorPoolInfo.pPoolSizes    = interfaceDescriptorPoolSizes;
         }
-        CheckVK(vkCreateDescriptorPool(VK_NULL_HANDLE, &interfaceDescriptorPoolInfo, nullptr, &sVkInterfaceDescriptorPool));
+        CheckVK(vkCreateDescriptorPool(vkDevice, &interfaceDescriptorPoolInfo, nullptr, &sVkInterfaceDescriptorPool));
 
         auto queueFamilyIndex = ImGui_ImplVulkanH_SelectQueueFamilyIndex(vkPhysicalDevice);
-        vkGetDeviceQueue(VK_NULL_HANDLE, queueFamilyIndex, 0u, &sVkInterfaceQueue);
+        vkGetDeviceQueue(vkDevice, queueFamilyIndex, 0u, &sVkInterfaceQueue);
+
+        VkFormat backBufferFormat = VK_FORMAT_R8G8B8A8_UNORM;
 
         VkPipelineRenderingCreateInfoKHR dynamicRenderingPipelineInfo = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR };
         {
             dynamicRenderingPipelineInfo.colorAttachmentCount    = 1;
-            dynamicRenderingPipelineInfo.pColorAttachmentFormats = nullptr;
+            dynamicRenderingPipelineInfo.pColorAttachmentFormats = &backBufferFormat;
             dynamicRenderingPipelineInfo.viewMask                = 0;
         }
 
@@ -69,7 +78,7 @@ void ImageQualityReference::CreateInterface()
         {
             infoVK.Instance                    = vkInstance;
             infoVK.PhysicalDevice              = vkPhysicalDevice;
-            infoVK.Device                      = nullptr;
+            infoVK.Device                      = vkDevice;
             infoVK.QueueFamily                 = queueFamilyIndex;
             infoVK.Queue                       = sVkInterfaceQueue;
             infoVK.DescriptorPool              = sVkInterfaceDescriptorPool;
