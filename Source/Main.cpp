@@ -1,7 +1,7 @@
-#include "NRI/NRIDescs.h"
 #include <State.h>
 #include <Common.h>
 #include <ResourceManager.h>
+#include <Interface.h>
 
 using namespace ImageQualityReference;
 
@@ -273,6 +273,9 @@ void InitializeGraphicsRuntime()
     NRI_ABORT_ON_FAILURE(nri::nriGetInterface(*gDevice, NRI_INTERFACE(nri::CoreInterface), (nri::CoreInterface*)&gNRI));
     NRI_ABORT_ON_FAILURE(nri::nriGetInterface(*gDevice, NRI_INTERFACE(nri::HelperInterface), (nri::HelperInterface*)&gNRI));
     NRI_ABORT_ON_FAILURE(nri::nriGetInterface(*gDevice, NRI_INTERFACE(nri::SwapChainInterface), (nri::SwapChainInterface*)&gNRI));
+    NRI_ABORT_ON_FAILURE(nri::nriGetInterface(*gDevice, NRI_INTERFACE(nri::ResourceAllocatorInterface), (nri::ResourceAllocatorInterface*)&gNRI));
+    NRI_ABORT_ON_FAILURE(nri::nriGetInterface(*gDevice, NRI_INTERFACE(nri::WrapperVKInterface), (nri::WrapperVKInterface*)&gNRI));
+    NRI_ABORT_ON_FAILURE(nri::nriGetInterface(*gDevice, NRI_INTERFACE(nri::SwapChainInterface), (nri::SwapChainInterface*)&gNRI));
 
     NRI_ABORT_ON_FAILURE(gNRI.GetCommandQueue(*gDevice, nri::CommandQueueType::GRAPHICS, gCommandQueue));
 
@@ -284,6 +287,8 @@ void InitializeGraphicsRuntime()
     gResourceManager = std::make_unique<ResourceManager>();
 
     RecreateSwapChain();
+
+    CreateInterface();
 }
 
 void ReleaseGraphicsRuntime()

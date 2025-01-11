@@ -35,6 +35,7 @@ using namespace Microsoft::WRL;
 #include <NRI/Extensions/NRIHelper.h>
 #include <NRI/Extensions/NRISwapChain.h>
 #include <NRI/Extensions/NRIResourceAllocator.h>
+#include <NRI/Extensions/NRIWrapperVK.h>
 
 #include <glslang/SPIRV/GlslangToSpv.h>
 #include <glslang/SPIRV/disassemble.h>
@@ -46,6 +47,12 @@ using namespace Microsoft::WRL;
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
+
+#ifdef __APPLE__
+#include <imgui_impl_vulkan.h>
+#else
+#error TODO
+#endif
 
 #ifdef _WIN32
 #include <imgui_impl_dx12.h>
@@ -78,5 +85,7 @@ using namespace Microsoft::WRL;
 #include <fstream>
 
 #include <spirv_to_dxil.h>
+
+#include <vk_enum_string_helper.h>
 
 #endif

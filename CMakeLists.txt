@@ -67,6 +67,7 @@ target_sources(ImageQualityReference PRIVATE
     Source/Main.cpp
     Source/State.cpp
     Source/ResourceManager.cpp
+    Source/Interface.cpp
     Source/Precompiled.cpp
 )
 
@@ -92,6 +93,7 @@ target_include_directories(ImageQualityReference BEFORE PRIVATE
     Source/Include/
     External/spirv-to-dxil/include
     External/NRI/Include
+    External/Vulkan-Headers
     $ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/include/
     $ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/include/d3dx12/
     ${Stb_INCLUDE_DIR}

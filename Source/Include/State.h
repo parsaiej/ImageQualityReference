@@ -1,6 +1,7 @@
 #ifndef STATE_H
 #define STATE_H
 
+#include "NRI/Extensions/NRIWrapperVK.h"
 namespace ImageQualityReference
 {
     class ResourceManager;
@@ -10,6 +11,7 @@ struct NRIInterface
     : public nri::CoreInterface,
       public nri::HelperInterface,
       public nri::ResourceAllocatorInterface,
+      public nri::WrapperVKInterface,
       public nri::SwapChainInterface {};
     // clang-format on
 

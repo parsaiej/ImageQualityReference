@@ -103,6 +103,7 @@ NriStruct(WrapperVKInterface) {
     Nri(Result) (NRI_CALL *CreateQueryPoolVK)               (NriRef(Device) device, const NriRef(QueryPoolVKDesc) queryPoolVKDesc, NriOut NriRef(QueryPool*) queryPool);
     Nri(Result) (NRI_CALL *CreateAccelerationStructureVK)   (NriRef(Device) device, const NriRef(AccelerationStructureVKDesc) accelerationStructureVKDesc, NriOut NriRef(AccelerationStructure*) accelerationStructure);
     VKHandle    (NRI_CALL *GetPhysicalDeviceVK)             (const NriRef(Device) device);
+    VKHandle    (NRI_CALL *GetDeviceVK)                   (const NriRef(Device) device);
     VKHandle    (NRI_CALL *GetInstanceVK)                   (const NriRef(Device) device);
     void*       (NRI_CALL *GetInstanceProcAddrVK)           (const NriRef(Device) device);
     void*       (NRI_CALL *GetDeviceProcAddrVK)             (const NriRef(Device) device);
