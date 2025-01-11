@@ -47,6 +47,7 @@ using namespace Microsoft::WRL;
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
+#include <imgui_impl_nri.h>
 
 #ifdef __APPLE__
 #include <imgui_impl_vulkan.h>

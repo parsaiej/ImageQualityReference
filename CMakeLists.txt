@@ -69,6 +69,9 @@ target_sources(ImageQualityReference PRIVATE
     Source/ResourceManager.cpp
     Source/Interface.cpp
     Source/Precompiled.cpp
+
+    # Custom backend for ImGui/NRI support
+    External/imgui_impl_nri/imgui_impl_nri.cpp
 )
 
 # Compile Options
@@ -94,6 +97,7 @@ target_include_directories(ImageQualityReference BEFORE PRIVATE
     External/spirv-to-dxil/include
     External/NRI/Include
     External/Vulkan-Headers
+    External/imgui_impl_nri
     $ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/include/
     $ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/include/d3dx12/
     ${Stb_INCLUDE_DIR}
