@@ -1,3 +1,6 @@
 [submodule "External/vcpkg"]
 	path = External/vcpkg
 	url = git@github.com:microsoft/vcpkg.git
+[submodule "External/imgui_impl_nri"]
+	path = External/imgui_impl_nri
+	url = git@github.com:parsaiej/imgui_impl_nri.git
