@@ -49,16 +49,6 @@ using namespace Microsoft::WRL;
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_nri.h>
 
-#ifdef __APPLE__
-#include <imgui_impl_vulkan.h>
-#else
-#error TODO
-#endif
-
-#ifdef _WIN32
-#include <imgui_impl_dx12.h>
-#endif
-
 #include <GLFW/glfw3.h>
 
 #ifdef _WIN32
@@ -86,7 +76,5 @@ using namespace Microsoft::WRL;
 #include <fstream>
 
 #include <spirv_to_dxil.h>
-
-#include <vk_enum_string_helper.h>
 
 #endif

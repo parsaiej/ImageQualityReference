@@ -96,7 +96,6 @@ target_include_directories(ImageQualityReference BEFORE PRIVATE
     Source/Include/
     External/spirv-to-dxil/include
     External/NRI/Include
-    External/Vulkan-Headers
     External/imgui_impl_nri
     $ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/include/
     $ENV{DIRECTX_AGILITY_SDK_DIR}/build/native/include/d3dx12/
