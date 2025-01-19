@@ -18,6 +18,7 @@ void ImageQualityReference::CreateInterface()
     ImGui_ImplNRI_InitInfo interfaceInitInfo = {};
     {
         interfaceInitInfo.Device = gDevice;
+        interfaceInitInfo.Queue  = gCommandQueue;
     }
     ImGui_ImplNRI_Init(&interfaceInitInfo);
 }
